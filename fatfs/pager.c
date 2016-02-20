@@ -29,10 +29,6 @@ struct port_bucket *disk_pager_bucket;
 /* A ports bucket to hold file pager ports.  */
 struct port_bucket *file_pager_bucket;
 
-/* Stores a reference to the requests instance used by the file pager so its
-   worker threads can be inhibited and resumed.  */
-struct pager_requests *file_pager_requests;
-
 /* Mapped image of the FAT.  */
 void *fat_image;
 
@@ -764,6 +760,8 @@ pager_dropweak (struct user_pager_info *p __attribute__ ((unused)))
 void
 create_fat_pager (void)
 {
+  pthread_t thread;
+  pthread_attr_t attr;
   error_t err;
 
   /* The disk pager.  */
@@ -778,36 +776,9 @@ create_fat_pager (void)
   file_pager_bucket = ports_create_bucket ();
 
   /* Start libpagers worker threads.  */
-  err = pager_start_workers (file_pager_bucket, &file_pager_requests);
+  err = pager_start_workers (file_pager_bucket);
   if (err)
     error (2, err, "can't create libpager worker threads");
-}
-
-error_t
-inhibit_fat_pager (void)
-{
-  error_t err;
-
-  /* The file pager can rely on the disk pager, so inhibit the file
-     pager first.  */
-
-  err = pager_inhibit_workers (file_pager_requests);
-  if (err)
-    return err;
-
-  err = pager_inhibit_workers (diskfs_disk_pager_requests);
-  /* We don't want only one pager disabled.  */
-  if (err)
-    pager_resume_workers (file_pager_requests);
-
-  return err;
-}
-
-void
-resume_fat_pager (void)
-{
-  pager_resume_workers (diskfs_disk_pager_requests);
-  pager_resume_workers (file_pager_requests);
 }
 
 /* Call this to create a FILE_DATA pager and return a send right.

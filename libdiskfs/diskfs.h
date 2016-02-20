@@ -25,7 +25,6 @@
 #include <pthread.h>
 #include <hurd/ports.h>
 #include <hurd/fshelp.h>
-#include <hurd/ihash.h>
 #include <hurd/iohelp.h>
 #include <idvec.h>
 #include <features.h>
@@ -81,31 +80,24 @@ struct peropen
    filesystem.  */
 struct node
 {
-  /* The slot we occupy in the node cache.  */
-  hurd_ihash_locp_t slot;
+  struct node *next, **prevp;
 
   struct disknode *dn;
 
   io_statbuf_t dn_stat;
 
-  /* Flags.  */
-  unsigned int
-
   /* Stat has been modified if one of the following four fields
      is nonzero.  Also, if one of the dn_set_?time fields is nonzero,
      the appropriate dn_stat.st_?tim field needs to be updated. */
-    dn_set_ctime:1,
-    dn_set_atime:1,
-    dn_set_mtime:1,
-    dn_stat_dirty:1,
-
-  /* Indicate whether the author is tracking the uid because the
-     on-disk file format does not encode a separate author.  */
-    author_tracks_uid:1;
+  int dn_set_ctime;
+  int dn_set_atime;
+  int dn_set_mtime;
+  int dn_stat_dirty;
 
   pthread_mutex_t lock;
 
-  refcounts_t refcounts;
+  int references;		/* hard references */
+  int light_references;		/* light references */
 
   mach_port_t sockaddr;		/* address for S_IFSOCK shortcut */
 
@@ -126,6 +118,8 @@ struct node
   loff_t allocsize;
 
   ino64_t cache_id;
+
+  int author_tracks_uid;
 };
 
 struct diskfs_control
@@ -203,6 +197,8 @@ extern volatile struct mapped_time_value *diskfs_mtime;
    information permanently in sync if this is set; the rest will
    be done by format independent code. */
 extern int diskfs_synchronous;
+
+extern pthread_spinlock_t diskfs_node_refcnt_lock;
 
 extern int pager_port_type;
 
@@ -298,7 +294,7 @@ int diskfs_shortcut_ifsock;
 
 /* The user may define this variable, otherwise it has a default value of 30.
    diskfs_set_sync_interval is called with this value when the first diskfs
-   thread is started up (in diskfs_spawn_first_thread).   */
+   thread is started up (in diskfs_spawn_first_threa).   */
 extern int diskfs_default_sync_interval;
 
 /* The user must define this variable, which should be a string that somehow
@@ -452,16 +448,14 @@ error_t diskfs_alloc_node (struct node *dp, mode_t mode, struct node **np);
 void diskfs_free_node (struct node *np, mode_t mode);
 
 /* Node NP has no more references; free local state, including *NP
-   if it isn't to be retained.  */
+   if it isn't to be retained.  diskfs_node_refcnt_lock is held. */
 void diskfs_node_norefs (struct node *np);
 
-/* The user must define this function unless she wants to use the node
-   cache.  See the section `Node cache' below.  Node NP has some light
+/* The user must define this function.  Node NP has some light
    references, but has just lost its last hard references.  Take steps
    so that if any light references can be freed, they are.  NP is locked
    as is the pager refcount lock.  This function will be called after
-   diskfs_lost_hardrefs.  An additional light reference is acquired by
-   libdiskfs across calls to this function.  */
+   diskfs_lost_hardrefs.  */
 void diskfs_try_dropping_softrefs (struct node *np);
 
 /* The user must define this funcction.  Node NP has some light
@@ -520,8 +514,7 @@ void diskfs_write_disknode (struct node *np, int wait);
    then return only after the physical media has been completely updated.  */
 void diskfs_file_update (struct node *np, int wait);
 
-/* The user must define this function unless she wants to use the node
-   cache.  See the section `Node cache' below.  For each active node, call
+/* The user must define this function.  For each active node, call
    FUN.  The node is to be locked around the call to FUN.  If FUN
    returns non-zero for any node, then immediately stop, and return
    that value. */
@@ -593,36 +586,6 @@ error_t (*diskfs_read_symlink_hook)(struct node *np, char *target);
 error_t diskfs_get_source (struct protid *cred,
                            char *source, size_t source_len);
 
-/* Libdiskfs contains a node cache.
-
-   Using it relieves the user of implementing diskfs_cached_lookup,
-   diskfs_node_iterate, and diskfs_try_dropping_softrefs.
-
-   In order to use it, she must implement the following functions with
-   the prefix `diskfs_user_'.  */
-
-/* This can be used to provide additional context to
-   diskfs_user_make_node and diskfs_user_read_node in case of cache
-   misses.  */
-struct lookup_context;
-
-/* The user must define this function if she wants to use the node
-   cache.  Create and initialize a node.  */
-error_t diskfs_user_make_node (struct node **npp, struct lookup_context *ctx);
-
-/* The user must define this function if she wants to use the node
-   cache.  Read stat information out of the on-disk node.  */
-error_t diskfs_user_read_node (struct node *np, struct lookup_context *ctx);
-
-/* The user must define this function if she wants to use the node
-   cache.  The last hard reference to a node has gone away; arrange to
-   have all the weak references dropped that can be.  */
-void diskfs_user_try_dropping_softrefs (struct node *np);
-
-/* Lookup node INUM (which must have a reference already) and return it
-   without allocating any new references. */
-struct node *diskfs_cached_ifind (ino_t inum);
-
 /* The library exports the following functions for general use */
 
 /* Call this after arguments have been parsed to initialize the library.
@@ -648,8 +611,9 @@ void diskfs_spawn_first_thread (ports_demuxer_type demuxer);
    diskfs_init_completed once it has a valid proc and auth port. */
 void diskfs_start_bootstrap ();
 
-/* Node NP now has no more references; clean all state.  NP must be
-   locked.  */
+/* Node NP now has no more references; clean all state.  The
+   _diskfs_node_refcnt_lock must be held, and will be released
+   upon return.  NP must be locked.  */
 void diskfs_drop_node (struct node *np);
 
 /* Set on disk fields from NP->dn_stat; update ctime, atime, and mtime
@@ -735,17 +699,7 @@ extern const size_t _diskfs_sizeof_struct_node;
 
 /* Return the address of the disknode for NODE.  NODE must have been
    allocated using diskfs_make_node_alloc.  */
-struct disknode *diskfs_node_disknode (struct node *node);
-
-/* Return the address of the node for DISKNODE.  DISKNODE must have
-   been allocated using diskfs_make_node_alloc.  */
-struct node *diskfs_disknode_node (struct disknode *disknode);
-
-#if defined(__USE_EXTERN_INLINES) || defined(DISKFS_DEFINE_EXTERN_INLINE)
-
-/* Return the address of the disknode for NODE.  NODE must have been
-   allocated using diskfs_make_node_alloc.  */
-DISKFS_EXTERN_INLINE struct disknode *
+static inline struct disknode *
 diskfs_node_disknode (struct node *node)
 {
   return (struct disknode *) ((char *) node + _diskfs_sizeof_struct_node);
@@ -753,13 +707,11 @@ diskfs_node_disknode (struct node *node)
 
 /* Return the address of the node for DISKNODE.  DISKNODE must have
    been allocated using diskfs_make_node_alloc.  */
-DISKFS_EXTERN_INLINE struct node *
+static inline struct node *
 diskfs_disknode_node (struct disknode *disknode)
 {
   return (struct node *) ((char *) disknode - _diskfs_sizeof_struct_node);
 }
-
-#endif /* Use extern inlines.  */
 
 
 /* The library also exports the following functions; they are not generally
@@ -852,17 +804,8 @@ error_t diskfs_dirrewrite (struct node *dp, struct node *oldnp,
 error_t diskfs_dirremove (struct node *dp, struct node *np,
 			  const char *name, struct dirstat *ds);
 
-/* The user must define this function unless she wants to use the node
-   cache.  See the section `Node cache' above.  Return the node
-   corresponding to CACHE_ID in *NPP. */
+/* Return the node corresponding to CACHE_ID in *NPP. */
 error_t diskfs_cached_lookup (ino64_t cache_id, struct node **npp);
-
-/* Return the node corresponding to CACHE_ID in *NPP.  In case of a
-   cache miss, use CTX to create it and load it from the disk.  See
-   the section `Node cache' above.  */
-error_t diskfs_cached_lookup_context (ino_t inum, struct node **npp,
-				      struct lookup_context *ctx);
-
 
 /* Create a new node. Give it MODE; if that includes IFDIR, also
    initialize `.' and `..' in the new directory.  Return the node in NPP.

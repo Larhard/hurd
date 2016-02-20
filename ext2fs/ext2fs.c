@@ -185,6 +185,8 @@ main (int argc, char **argv)
 
   map_hypermetadata ();
 
+  inode_init ();
+
   /* Set diskfs_root_node to the root inode. */
   err = diskfs_cached_lookup (EXT2_ROOT_INO, &diskfs_root_node);
   if (err)
@@ -207,20 +209,10 @@ main (int argc, char **argv)
 error_t
 diskfs_reload_global_state ()
 {
-  error_t err;
-
   pokel_flush (&global_pokel);
   pager_flush (diskfs_disk_pager, 1);
-
-  /* libdiskfs is not responsible for inhibiting paging.  */
-  err = inhibit_ext2_pager ();
-  if (err)
-    return err;
-
+  sblock = NULL;
   get_hypermetadata ();
   map_hypermetadata ();
-
-  resume_ext2_pager ();
-
   return 0;
 }

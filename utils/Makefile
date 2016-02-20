@@ -22,7 +22,7 @@ targets = shd ps settrans showtrans syncfs fsysopts \
 	storeinfo login w uptime ids loginpr sush vmstat portinfo \
 	devprobe vminfo addauth rmauth unsu setauth ftpcp ftpdir storecat \
 	storeread msgport rpctrace mount gcore fakeauth fakeroot remap \
-	umount nullauth rpcscan vmallocate
+	umount nullauth
 
 special-targets = loginpr sush uptime fakeroot remap
 SRCS = shd.c ps.c settrans.c syncfs.c showtrans.c addauth.c rmauth.c \
@@ -31,7 +31,7 @@ SRCS = shd.c ps.c settrans.c syncfs.c showtrans.c addauth.c rmauth.c \
 	parse.c frobauth.c frobauth-mod.c setauth.c pids.c nonsugid.c \
 	unsu.c ftpcp.c ftpdir.c storeread.c storecat.c msgport.c \
 	rpctrace.c mount.c gcore.c fakeauth.c fakeroot.sh remap.sh \
-	nullauth.c match-options.c msgids.c rpcscan.c
+	nullauth.c match-options.c
 
 OBJS = $(filter-out %.sh,$(SRCS:.c=.o))
 HURDLIBS = ps ihash store fshelp ports ftpconn shouldbeinlibc
@@ -54,24 +54,21 @@ login addauth setauth: nonsugid.o
 addauth rmauth setauth unsu: frobauth.o
 rmauth setauth unsu: frobauth-mod.o
 ps w: psout.o ../libps/libps.a ../libihash/libihash.a
-portinfo: ../libihash/libihash.a ../libps/libps.a
+portinfo: ../libps/libps.a
 
 storeinfo storecat storeread: ../libstore/libstore.a
 ftpcp ftpdir: ../libftpconn/libftpconn.a
-mount umount: ../libihash/libihash.a
-settrans: ../libfshelp/libfshelp.a ../libihash/libihash.a \
-	../libports/libports.a
+
+settrans: ../libfshelp/libfshelp.a ../libports/libports.a
 ps w ids settrans syncfs showtrans fsysopts storeinfo login vmstat portinfo \
   devprobe vminfo addauth rmauth setauth unsu ftpcp ftpdir storeread \
-  storecat msgport mount umount nullauth rpctrace: \
+  storecat msgport mount umount nullauth: \
 	../libshouldbeinlibc/libshouldbeinlibc.a
 
 $(filter-out $(special-targets), $(targets)): %: %.o
 
-rpctrace: ../libports/libports.a
-rpctrace rpcscan: msgids.o \
-	  ../libihash/libihash.a
-msgids-CPPFLAGS = -DDATADIR=\"${datadir}\"
+rpctrace: ../libports/libports.a ../libihash/libihash.a
+rpctrace-CPPFLAGS = -DDATADIR=\"${datadir}\"
 
 fakeauth: authServer.o auth_requestUser.o interruptServer.o \
 	  ../libports/libports.a ../libihash/libihash.a \

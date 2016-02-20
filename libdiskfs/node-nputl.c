@@ -25,10 +25,14 @@
 void
 diskfs_nput_light (struct node *np)
 {
-  struct references result;
-  refcounts_deref_weak (&np->refcounts, &result);
-  if (result.hard == 0 && result.weak == 0)
+  pthread_spin_lock (&diskfs_node_refcnt_lock);
+  assert (np->light_references);
+  np->light_references--;
+  if (np->references + np->light_references == 0)
     diskfs_drop_node (np);
   else
-    pthread_mutex_unlock (&np->lock);
+    {
+      pthread_spin_unlock (&diskfs_node_refcnt_lock);
+      pthread_mutex_unlock (&np->lock);
+    }
 }

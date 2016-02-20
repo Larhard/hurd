@@ -21,7 +21,6 @@
 /* Written by Michael I. Bushnell.  */
 
 #include <mach.h>
-#include <mach/task_notify.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <errno.h>
@@ -110,15 +109,13 @@ S_proc_reauthenticate (struct proc *p, mach_port_t rendport)
 
   /* Release the global lock while blocking on the auth server and client.  */
   pthread_mutex_unlock (&global_lock);
-  do
-    err = auth_server_authenticate (authserver,
-				    rendport, MACH_MSG_TYPE_COPY_SEND,
-				    MACH_PORT_NULL, MACH_MSG_TYPE_COPY_SEND,
-				    &gen_uids, &ngen_uids,
-				    &aux_uids, &naux_uids,
-				    &gen_gids, &ngen_gids,
-				    &aux_gids, &naux_gids);
-  while (err == EINTR);
+  err = auth_server_authenticate (authserver,
+				  rendport, MACH_MSG_TYPE_COPY_SEND,
+				  MACH_PORT_NULL, MACH_MSG_TYPE_COPY_SEND,
+				  &gen_uids, &ngen_uids,
+				  &aux_uids, &naux_uids,
+				  &gen_gids, &ngen_gids,
+				  &aux_gids, &naux_gids);
   pthread_mutex_lock (&global_lock);
 
   if (err)

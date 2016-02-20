@@ -207,26 +207,26 @@ extern void			neigh_sysctl_unregister(struct neigh_parms *p);
  *	is only referenced by the corresponding table.
  */
 
-static __inline__ void neigh_release(struct neighbour *neigh)
+extern __inline__ void neigh_release(struct neighbour *neigh)
 {
 	if (atomic_dec_and_test(&neigh->refcnt) && neigh->tbl == NULL)
 		neigh_destroy(neigh);
 }
 
-static __inline__ struct neighbour * neigh_clone(struct neighbour *neigh)
+extern __inline__ struct neighbour * neigh_clone(struct neighbour *neigh)
 {
 	if (neigh)
 		atomic_inc(&neigh->refcnt);
 	return neigh;
 }
 
-static __inline__ void neigh_confirm(struct neighbour *neigh)
+extern __inline__ void neigh_confirm(struct neighbour *neigh)
 {
 	if (neigh)
 		neigh->confirmed = jiffies;
 }
 
-static __inline__ struct neighbour *
+extern __inline__ struct neighbour *
 neigh_lookup(struct neigh_table *tbl, const void *pkey, struct device *dev)
 {
 	struct neighbour *neigh;
@@ -236,17 +236,17 @@ neigh_lookup(struct neigh_table *tbl, const void *pkey, struct device *dev)
 	return neigh;
 }
 
-static __inline__ int neigh_is_connected(struct neighbour *neigh)
+extern __inline__ int neigh_is_connected(struct neighbour *neigh)
 {
 	return neigh->nud_state&NUD_CONNECTED;
 }
 
-static __inline__ int neigh_is_valid(struct neighbour *neigh)
+extern __inline__ int neigh_is_valid(struct neighbour *neigh)
 {
 	return neigh->nud_state&NUD_VALID;
 }
 
-static __inline__ int neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
+extern __inline__ int neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 {
 	neigh->used = jiffies;
 	if (!(neigh->nud_state&(NUD_CONNECTED|NUD_DELAY|NUD_PROBE)))
@@ -254,13 +254,13 @@ static __inline__ int neigh_event_send(struct neighbour *neigh, struct sk_buff *
 	return 0;
 }
 
-static __inline__ void neigh_table_lock(struct neigh_table *tbl)
+extern __inline__ void neigh_table_lock(struct neigh_table *tbl)
 {
 	atomic_inc(&tbl->lock);
 	synchronize_bh();
 }
 
-static __inline__ void neigh_table_unlock(struct neigh_table *tbl)
+extern __inline__ void neigh_table_unlock(struct neigh_table *tbl)
 {
 	atomic_dec(&tbl->lock);
 }

@@ -121,12 +121,10 @@ fetch_thread_fpregset (thread_t thread, prfpregset_t *fpregs)
 #endif
 
 
-#ifndef TIME_VALUE_TO_TIMESPEC
 #define TIME_VALUE_TO_TIMESPEC(tv, ts) {                                \
         (ts)->tv_sec = (tv)->seconds;                                   \
         (ts)->tv_nsec = (tv)->microseconds * 1000;                      \
 }
-#endif
 
 #define PAGES_TO_KB(x)	((x) * (vm_page_size / 1024))
 #define ENCODE_PCT(f)	((uint16_t) ((f) * 32768.0))
@@ -408,8 +406,8 @@ dump_core (task_t task, file_t file, off_t corelimit,
 	if (err == 0)
 	  {
 	    err = proc_get_arg_locations (proc,
-					  (vm_address_t *) &psinfo.data.pr_argv,
-					  (vm_address_t *) &psinfo.data.pr_envp);
+					  &psinfo.data.pr_argv,
+					  &psinfo.data.pr_envp);
 	    mach_port_deallocate (mach_task_self (), proc);
 	  }
 	{

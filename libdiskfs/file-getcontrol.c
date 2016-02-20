@@ -25,20 +25,20 @@ diskfs_S_file_getcontrol (struct protid *cred,
 			  mach_port_t *control,
 			  mach_msg_type_name_t *controltype)
 {
-  error_t err;
+  int error;
   struct port_info *newpi;
   
   if (!cred)
     return EOPNOTSUPP;
   
-  err = fshelp_iscontroller (&diskfs_root_node->dn_stat, cred->user);
-  if (err)
-    return err;
+  error = fshelp_iscontroller (&diskfs_root_node->dn_stat, cred->user);
+  if (error)
+    return error;
 
-  err = ports_create_port (diskfs_control_class, diskfs_port_bucket,
+  error = ports_create_port (diskfs_control_class, diskfs_port_bucket,
 			     sizeof (struct port_info), &newpi);
-  if (err)
-    return err;
+  if (error)
+    return error;
 
   pthread_spin_lock (&_diskfs_control_lock);
   _diskfs_ncontrol_ports++;

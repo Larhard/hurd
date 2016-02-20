@@ -74,6 +74,16 @@ extern int trivfs_support_exec;
    operations.)  */
 extern int trivfs_allow_open;
 
+/* If the user defines these, they should be vectors (and the associated
+   sizes) of port classes that will be translated into control & protid
+   pointers for passing to rpcs, in addition to those passed to or created by
+   trivfs_create_control (or trivfs_startup) will automatically be
+   recognized.  */
+extern struct port_class *trivfs_protid_portclasses[];
+extern int trivfs_protid_nportclasses;
+extern struct port_class *trivfs_cntl_portclasses[];
+extern int trivfs_cntl_nportclasses;
+
 /* The user must define this function.  This should modify a struct
    stat (as returned from the underlying node) for presentation to
    callers of io_stat.  It is permissible for this function to do

@@ -92,10 +92,7 @@ S_socket_connect (struct sock_user *user, struct addr *addr)
     return EOPNOTSUPP;
 
   err = addr_get_sock (addr, &peer);
-  if (err == EADDRNOTAVAIL)
-    /* The server went away.  */
-    err = ECONNREFUSED;
-  else if (!err)
+  if (!err)
     {
       struct sock *sock = user->sock;
       struct connq *cq = peer->listen_queue;
@@ -298,9 +295,6 @@ S_socket_send (struct sock_user *user, struct addr *dest_addr, int flags,
   if (dest_addr)
     {
       err = addr_get_sock (dest_addr, &dest_sock);
-      if (err == EADDRNOTAVAIL)
-	/* The server went away.  */
-	err = ECONNREFUSED;
       if (err)
 	return err;
       if (sock->pipe_class != dest_sock->pipe_class)
@@ -441,32 +435,9 @@ S_socket_getopt (struct sock_user *user,
       switch (opt)
 	{
 	case SO_TYPE:
-	  if (*value_len < sizeof (int))
-	    {
-	      ret = EINVAL;
-	      break;
-	    }
+	  assert (*value_len >= sizeof (int));
 	  *(int *)*value = user->sock->pipe_class->sock_type;
 	  *value_len = sizeof (int);
-	  break;
-	case SO_ERROR:
-	  /* We do not have asynchronous operations (such as connect), so no
-	     error to report.  */
-	  if (*value_len < sizeof (short))
-	  {
-	    *(char*)*value = 0;
-	    *value_len = sizeof(char);
-	  }
-	  else if (*value_len < sizeof (int))
-	  {
-	    *(short*)*value = 0;
-	    *value_len = sizeof(short);
-	  }
-	  else
-	  {
-	    *(int*)*value = 0;
-	    *value_len = sizeof(int);
-	  }
 	  break;
 	default:
 	  ret = ENOPROTOOPT;

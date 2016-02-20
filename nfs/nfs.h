@@ -24,7 +24,6 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include "nfs-spec.h"
-#include <hurd/ihash.h>
 #include <hurd/netfs.h>
 
 /* A file handle */
@@ -40,9 +39,9 @@ struct fhandle
    node. */
 struct netnode
 {
-  hurd_ihash_locp_t slot;
   struct fhandle handle;
   time_t stat_updated;
+  struct node *hnext, **hprevp;
 
   /* These two fields handle translators set internally but
      unknown to the server. */
@@ -193,7 +192,7 @@ void *timeout_service_thread (void *);
 void *rpc_receive_thread (void *);
 
 /* cache.c */
-void lookup_fhandle (struct fhandle *, struct node **);
+void lookup_fhandle (void *, size_t, struct node **);
 int *recache_handle (int *, struct node *);
 
 /* name-cache.c */

@@ -42,15 +42,10 @@ struct idspec
   int references;
 };
 
-union cache_handle_array {
-  char array[NFS2_FHSIZE];
-  int fs;
-};
-
 struct cache_handle
 {
   struct cache_handle *next, **prevp;
-  union cache_handle_array handle;
+  char handle[NFS2_FHSIZE];
   struct idspec *ids;
   file_t port;
   time_t lastuse;

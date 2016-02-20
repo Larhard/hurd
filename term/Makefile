@@ -26,15 +26,13 @@ target = term
 SRCS = devio.c munge.c users.c main.c ptyio.c hurdio.c xinl.c
 
 HURDLIBS = trivfs fshelp iohelp ports ihash shouldbeinlibc
-LDLIBS = -lpthread
+OTHERLIBS = -lpthread
 OBJS = $(subst .c,.o,$(SRCS)) termServer.o device_replyServer.o tioctlServer.o ourmsgUser.o
 
 include ../Makeconf
 
 device_replyServer-CPPFLAGS = -DTypeCheck=0 -Wno-unused # XXX
 
-device_reply-MIGSFLAGS=\
-    "-DMACH_PAYLOAD_TO_PORT=ports_payload_get_name" \
-    "-DDEVICE_IMPORTS=import \"$(srcdir)/../libports/ports.h\";"
+device_reply-MIGSFLAGS = -DMACH_PAYLOAD_TO_PORT=ports_payload_get_name
 tioctl-MIGSFLAGS = -imacros $(srcdir)/mig-mutate.h
 term-MIGSFLAGS = -imacros $(srcdir)/mig-mutate.h

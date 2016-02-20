@@ -28,10 +28,14 @@
 #include <pthread.h>
 #include <hurd/ihash.h>
 #include <hurd/paths.h>
+#ifdef HAVE_FILE_EXEC_FILE_NAME
+#include <hurd/fs_experimental.h>
+#endif
 
 #include <version.h>
 
 #include "libnetfs/fs_S.h"
+#include "libnetfs/fs_experimental_S.h"
 #include "libnetfs/io_S.h"
 #include "libnetfs/fsys_S.h"
 #include "libports/notify_S.h"
@@ -75,9 +79,6 @@ new_node (file_t file, mach_port_t idport, int locked, int openmodes,
 {
   error_t err;
   struct netnode *nn;
-
-  assert ((openmodes & ~(O_RDWR|O_EXEC)) == 0);
-
   *np = netfs_make_node_alloc (sizeof *nn);
   if (*np == 0)
     {
@@ -206,16 +207,14 @@ check_openmodes (struct netnode *nn, int newmodes, file_t file)
 {
   error_t err = 0;
 
-  assert ((newmodes & ~(O_RDWR|O_EXEC)) == 0);
-
   if (newmodes &~ nn->openmodes)
     {
       /* The user wants openmodes we haven't tried before.  */
 
       if (file != MACH_PORT_NULL && (nn->openmodes & ~newmodes))
 	{
-	  /* Intersecting sets with no inclusion. `file' doesn't fit either,
-	     we need yet another new peropen on this node.  */
+	  /* Intersecting sets.
+	     We need yet another new peropen on this node.  */
 	  mach_port_deallocate (mach_task_self (), file);
 	  file = MACH_PORT_NULL;
 	}
@@ -245,17 +244,6 @@ check_openmodes (struct netnode *nn, int newmodes, file_t file)
     mach_port_deallocate (mach_task_self (), file);
 
   return err;
-}
-
-/* Return the mode that the real underlying file should have if the
-   fake mode is being set to MODE.  We always give ourselves read and
-   write permission so that we can open the file as root would be able
-   to.  We give ourselves execute permission iff any execute bit is
-   set in the fake mode.  */
-static inline mode_t
-real_from_fake_mode (mode_t mode)
-{
-  return mode | S_IREAD | S_IWRITE | (((mode << 3) | (mode << 6)) & S_IEXEC);
 }
 
 /* This is called by netfs_S_fsys_getroot.  */
@@ -294,7 +282,7 @@ netfs_S_dir_lookup (struct protid *diruser,
  redo_lookup:
   err = dir_lookup (dir, filename,
 		    flags & (O_NOLINK|O_RDWR|O_EXEC|O_CREAT|O_EXCL|O_NONBLOCK),
-		    real_from_fake_mode (mode), do_retry, retry_name, &file);
+		    mode, do_retry, retry_name, &file);
   if (dir != netfs_node_netnode (dnp)->file)
     mach_port_deallocate (mach_task_self (), dir);
   if (err)
@@ -308,10 +296,10 @@ netfs_S_dir_lookup (struct protid *diruser,
 	err = io_reauthenticate (file, ref, MACH_MSG_TYPE_MAKE_SEND);
 	if (! err)
 	  {
+	    mach_port_deallocate (mach_task_self (), file);
 	    err = auth_user_authenticate (fakeroot_auth_port, ref,
 					  MACH_MSG_TYPE_MAKE_SEND,
 					  &dir);
-	    mach_port_deallocate (mach_task_self (), file);
 	  }
 	mach_port_destroy (mach_task_self (), ref);
 	if (err)
@@ -406,7 +394,7 @@ netfs_S_dir_lookup (struct protid *diruser,
   else
     {
       pthread_spin_unlock (&netfs_node_refcnt_lock);
-      err = new_node (file, idport, 1, flags & (O_RDWR|O_EXEC), &np);
+      err = new_node (file, idport, 1, flags, &np);
       pthread_mutex_unlock (&dnp->lock);
       if (!err)
 	{
@@ -444,20 +432,6 @@ netfs_S_dir_lookup (struct protid *diruser,
   return err;
 }
 
-/* The user may define this function.  Attempt to set the passive
-   translator record for FILE to ARGZ (of length ARGZLEN) for user
-   CRED. */
-error_t
-netfs_set_translator (struct iouser *cred, struct node *np,
-		      char *argz, size_t argzlen)
-{
-  return file_set_translator (netfs_node_netnode (np)->file,
-			      FS_TRANS_EXCL|FS_TRANS_SET,
-			      FS_TRANS_EXCL|FS_TRANS_SET, 0,
-			      argz, argzlen,
-			      MACH_PORT_NULL, MACH_MSG_TYPE_COPY_SEND);
-}
-
 /* These callbacks are used only by the standard netfs_S_dir_lookup,
    which we do not use.  But the shared library requires us to define them.  */
 error_t
@@ -493,7 +467,7 @@ netfs_validate_stat (struct node *np, struct iouser *cred)
   if (netfs_node_netnode (np)->faked & FAKE_AUTHOR)
     st.st_author = np->nn_stat.st_author;
   if (netfs_node_netnode (np)->faked & FAKE_MODE)
-    st.st_mode = (st.st_mode & S_IFMT) | (np->nn_stat.st_mode & ~S_IFMT);
+    st.st_mode = np->nn_stat.st_mode;
 
   np->nn_stat = st;
   np->nn_translated = S_ISLNK (st.st_mode) ? S_IFLNK : 0;
@@ -536,6 +510,17 @@ netfs_attempt_chauthor (struct iouser *cred, struct node *np, uid_t author)
   return 0;
 }
 
+/* Return the mode that the real underlying file should have if the
+   fake mode is being set to MODE.  We always give ourselves read and
+   write permission so that we can open the file as root would be able
+   to.  We give ourselves execute permission iff any execute bit is
+   set in the fake mode.  */
+static inline mode_t
+real_from_fake_mode (mode_t mode)
+{
+  return mode | S_IREAD | S_IWRITE | (((mode << 3) | (mode << 6)) & S_IEXEC);
+}
+
 /* This should attempt a chmod call for the user specified by CRED on
    locked node NODE, to change the mode to MODE.  Unlike the normal Unix
    and Hurd meaning of chmod, this function is also used to attempt to
@@ -544,26 +529,14 @@ netfs_attempt_chauthor (struct iouser *cred, struct node *np, uid_t author)
 error_t
 netfs_attempt_chmod (struct iouser *cred, struct node *np, mode_t mode)
 {
-  struct netnode *nn;
-  mode_t real_mode;
-
   if ((mode & S_IFMT) == 0)
     mode |= np->nn_stat.st_mode & S_IFMT;
   if ((mode & S_IFMT) != (np->nn_stat.st_mode & S_IFMT))
     return EOPNOTSUPP;
 
-  /* Make sure that `check_openmodes' will still always be able to reopen
-     it.  */
-  nn = netfs_node_netnode (np);
-  real_mode = mode;
-  real_mode |= S_IRUSR;
-  real_mode |= S_IWUSR;
-  if (S_ISDIR (mode) || (nn->openmodes & O_EXEC))
-    real_mode |= S_IXUSR;
-
   /* We don't bother with error checking since the fake mode change should
      always succeed--worst case a later open will get EACCES.  */
-  (void) file_chmod (nn->file, real_mode);
+  (void) file_chmod (netfs_node_netnode (np)->file, mode);
   set_faked_attribute (np, FAKE_MODE);
   np->nn_stat.st_mode = mode;
   return 0;
@@ -780,7 +753,8 @@ netfs_attempt_write (struct iouser *cred, struct node *np,
 error_t
 netfs_report_access (struct iouser *cred, struct node *np, int *types)
 {
-  return file_check_access (netfs_node_netnode (np)->file, types);
+  *types = O_RDWR|O_EXEC;
+  return 0;
 }
 
 error_t
@@ -815,23 +789,24 @@ netfs_file_get_storage_info (struct iouser *cred,
 }
 
 kern_return_t
-netfs_S_file_exec (struct protid *user,
-                   task_t task,
-                   int flags,
-                   char *argv,
-                   size_t argvlen,
-                   char *envp,
-                   size_t envplen,
-                   mach_port_t *fds,
-                   size_t fdslen,
-                   mach_port_t *portarray,
-                   size_t portarraylen,
-                   int *intarray,
-                   size_t intarraylen,
-                   mach_port_t *deallocnames,
-                   size_t deallocnameslen,
-                   mach_port_t *destroynames,
-                   size_t destroynameslen)
+netfs_S_file_exec_file_name (struct protid *user,
+			     task_t task,
+			     int flags,
+			     char *filename,
+			     char *argv,
+			     size_t argvlen,
+			     char *envp,
+			     size_t envplen,
+			     mach_port_t *fds,
+			     size_t fdslen,
+			     mach_port_t *portarray,
+			     size_t portarraylen,
+			     int *intarray,
+			     size_t intarraylen,
+			     mach_port_t *deallocnames,
+			     size_t deallocnameslen,
+			     mach_port_t *destroynames,
+			     size_t destroynameslen)
 {
   error_t err;
   file_t file;
@@ -850,14 +825,30 @@ netfs_S_file_exec (struct protid *user,
 
   if (!err)
     {
+#ifdef HAVE_FILE_EXEC_FILE_NAME
       /* We cannot use MACH_MSG_TYPE_MOVE_SEND because we might need to
 	 retry an interrupted call that would have consumed the rights.  */
-      err = file_exec (netfs_node_netnode (user->po->np)->file,
-		       task, flags, argv, argvlen,
-		       envp, envplen, fds, MACH_MSG_TYPE_COPY_SEND, fdslen,
-		       portarray, MACH_MSG_TYPE_COPY_SEND, portarraylen,
-		       intarray, intarraylen, deallocnames, deallocnameslen,
-		       destroynames, destroynameslen);
+      err = file_exec_file_name (netfs_node_netnode (user->po->np)->file,
+				 task, flags,
+				 filename,
+				 argv, argvlen,
+				 envp, envplen,
+				 fds, MACH_MSG_TYPE_COPY_SEND, fdslen,
+				 portarray, MACH_MSG_TYPE_COPY_SEND,
+				 portarraylen,
+				 intarray, intarraylen,
+				 deallocnames, deallocnameslen,
+				 destroynames, destroynameslen);
+      /* For backwards compatibility.  Just drop it when we kill
+	 file_exec.  */
+      if (err == MIG_BAD_ID)
+#endif
+	err = file_exec (user->po->np->nn->file, task, flags, argv, argvlen,
+			 envp, envplen, fds, MACH_MSG_TYPE_COPY_SEND, fdslen,
+			 portarray, MACH_MSG_TYPE_COPY_SEND, portarraylen,
+			 intarray, intarraylen, deallocnames, deallocnameslen,
+			 destroynames, destroynameslen);
+
       mach_port_deallocate (mach_task_self (), file);
     }
 
@@ -871,6 +862,38 @@ netfs_S_file_exec (struct protid *user,
 	mach_port_deallocate (mach_task_self (), portarray[i]);
     }
   return err;
+}
+
+kern_return_t
+netfs_S_file_exec (struct protid *user,
+                   task_t task,
+                   int flags,
+                   char *argv,
+                   size_t argvlen,
+                   char *envp,
+                   size_t envplen,
+                   mach_port_t *fds,
+                   size_t fdslen,
+                   mach_port_t *portarray,
+                   size_t portarraylen,
+                   int *intarray,
+                   size_t intarraylen,
+                   mach_port_t *deallocnames,
+                   size_t deallocnameslen,
+                   mach_port_t *destroynames,
+                   size_t destroynameslen)
+{
+  return netfs_S_file_exec_file_name (user,
+				      task,
+				      flags,
+				      "",
+				      argv, argvlen,
+				      envp, envplen,
+				      fds, fdslen,
+				      portarray, portarraylen,
+				      intarray, intarraylen,
+				      deallocnames, deallocnameslen,
+				      destroynames, destroynameslen);
 }
 
 error_t
@@ -989,6 +1012,7 @@ netfs_demuxer (mach_msg_header_t *inp,
   mig_routine_t routine;
   if ((routine = netfs_io_server_routine (inp)) ||
       (routine = netfs_fs_server_routine (inp)) ||
+      (routine = netfs_fs_experimental_server_routine (inp)) ||
       (routine = ports_notify_server_routine (inp)) ||
       (routine = netfs_fsys_server_routine (inp)) ||
       /* XXX we should intercept interrupt_operation and do
@@ -1032,12 +1056,10 @@ netfs_demuxer (mach_msg_header_t *inp,
 	  err = mach_msg (inp, MACH_SEND_MSG, inp->msgh_size, 0,
 			  MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE,
 			  MACH_PORT_NULL);
-	  if (err)
-	    ((mig_reply_header_t *) outp)->RetCode = err;
-	  else
-	    /* We already sent the message, so the server loop shouldn't do it again.  */
-	    ((mig_reply_header_t *) outp)->RetCode = MIG_NO_REPLY;
+	  assert_perror (err);	/* XXX should synthesize reply */
 	  ports_port_deref (cred);
+	  /* We already sent the message, so the server loop shouldn't do it again.  */
+	  ((mig_reply_header_t *) outp)->RetCode = MIG_NO_REPLY;
 	  return 1;
 	}
     }

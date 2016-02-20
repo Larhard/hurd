@@ -50,12 +50,9 @@ typedef int8_t    __s8;
 #undef ext2_debug
 
 #ifdef EXT2FS_DEBUG
-#include <stdio.h>
 extern int ext2_debug_flag;
-#define ext2_debug_(f, a...) \
- fprintf (stderr, "ext2fs: (debug) %s: " f "\n", __FUNCTION__ , ## a)
 #define ext2_debug(f, a...) \
- do { if (ext2_debug_flag) ext2_debug_(f, ## a); } while (0)
+ do { if (ext2_debug_flag) printf ("ext2fs: (debug) %s: " f "\n", __FUNCTION__ , ## a); } while (0)
 #else
 #define ext2_debug(f, a...)	(void)0
 #endif
@@ -67,6 +64,8 @@ extern int ext2_debug_flag;
    of paging requests, which may be helpful in catching bugs. */
 
 #undef DONT_CACHE_MEMORY_OBJECTS
+
+int printf (const char *fmt, ...);
 
 /* A block number.  */
 typedef __u32 block_t;
@@ -116,14 +115,14 @@ void pokel_inherit (struct pokel *pokel, struct pokel *from);
 
 #include <stdint.h>
 
-extern int test_bit (unsigned num, unsigned char *bitmap);
+extern int test_bit (unsigned num, char *bitmap);
 
-extern int set_bit (unsigned num, unsigned char *bitmap);
+extern int set_bit (unsigned num, char *bitmap);
 
 #if defined(__USE_EXTERN_INLINES) || defined(EXT2FS_DEFINE_EI)
 /* Returns TRUE if bit NUM is set in BITMAP.  */
 EXT2FS_EI int
-test_bit (unsigned num, unsigned char *bitmap)
+test_bit (unsigned num, char *bitmap)
 {
   const uint32_t *const bw = (uint32_t *) bitmap + (num >> 5);
   const uint_fast32_t mask = 1 << (num & 31);
@@ -133,7 +132,7 @@ test_bit (unsigned num, unsigned char *bitmap)
 /* Sets bit NUM in BITMAP, and returns the previous state of the bit.  Unlike
    the linux version, this function is NOT atomic!  */
 EXT2FS_EI int
-set_bit (unsigned num, unsigned char *bitmap)
+set_bit (unsigned num, char *bitmap)
 {
   uint32_t *const bw = (uint32_t *) bitmap + (num >> 5);
   const uint_fast32_t mask = 1 << (num & 31);
@@ -143,7 +142,7 @@ set_bit (unsigned num, unsigned char *bitmap)
 /* Clears bit NUM in BITMAP, and returns the previous state of the bit.
    Unlike the linux version, this function is NOT atomic!  */
 EXT2FS_EI int
-clear_bit (unsigned num, unsigned char *bitmap)
+clear_bit (unsigned num, char *bitmap)
 {
   uint32_t *const bw = (uint32_t *) bitmap + (num >> 5);
   const uint_fast32_t mask = 1 << (num & 31);
@@ -159,6 +158,9 @@ struct disknode
   /* For a directory, this array holds the number of directory entries in
      each DIRBLKSIZE piece of the directory. */
   int *dirents;
+
+  /* Links on hash list. */
+  struct node *hnext, **hprevp;
 
   /* Lock to lock while fiddling with this inode's block allocation info.  */
   pthread_rwlock_t alloc_lock;
@@ -202,12 +204,6 @@ struct user_pager_info
 /* Set up the disk pager.  */
 void create_disk_pager (void);
 
-/* Inhibit the disk pager.  */
-error_t inhibit_ext2_pager (void);
-
-/* Resume the disk pager.  */
-void resume_ext2_pager (void);
-
 /* Call this when we should turn off caching so that unused memory object
    ports get freed.  */
 void drop_pager_softrefs (struct node *node);
@@ -244,7 +240,7 @@ extern int disk_cache_blocks;
 
 #define DC_NO_BLOCK	((block_t) -1L)
 
-#ifdef DEBUG_DISK_CACHE
+#ifndef NDEBUG
 #define DISK_CACHE_LAST_READ_XOR	0xDEADBEEF
 #endif
 
@@ -254,8 +250,7 @@ struct disk_cache_info
   block_t block;
   uint16_t flags;
   uint16_t ref_count;
-  struct disk_cache_info *next;	/* List of reusable entries.  */
-#ifdef DEBUG_DISK_CACHE
+#ifndef NDEBUG
   block_t last_read, last_read_xor;
 #endif
 };
@@ -424,6 +419,12 @@ dino_deref (struct ext2_inode *inode)
 
 /* Write all active disknodes into the inode pager. */
 void write_all_disknodes ();
+
+/* Lookup node INUM (which must have a reference already) and return it
+   without allocating any new references. */
+struct node *ifind (ino_t inum);
+
+void inode_init (void);
 
 /* ---------------------------------------------------------------- */
 
@@ -437,7 +438,7 @@ struct pokel global_pokel;
 /* If the block size is less than the page size, then this bitmap is used to
    record which disk blocks are actually modified, so we don't stomp on parts
    of the disk which are backed by file pagers.  */
-unsigned char *modified_global_blocks;
+char *modified_global_blocks;
 pthread_spinlock_t modified_global_blocks_lock;
 
 extern int global_block_modified (block_t block);
@@ -502,7 +503,7 @@ record_indir_poke (struct node *node, void *ptr)
   ext2_debug ("(%llu, %p)", node->cache_id, ptr);
   assert (disk_cache_block_is_ref (block));
   global_block_modified (block);
-  pokel_add (&diskfs_node_disknode (node)->indir_pokel, block_ptr, block_size);
+  pokel_add (&node->dn->indir_pokel, block_ptr, block_size);
 }
 
 /* ---------------------------------------------------------------- */
@@ -523,7 +524,7 @@ alloc_sync (struct node *np)
       if (np)
 	{
 	  diskfs_node_update (np, 1);
-	  pokel_sync (&diskfs_node_disknode (np)->indir_pokel, 1);
+	  pokel_sync (&np->dn->indir_pokel, 1);
 	}
       diskfs_set_hypermetadata (1, 0);
     }

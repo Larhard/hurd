@@ -30,14 +30,11 @@
 
 static mach_port_t real_defpager, dev_master;
 
-/* Our port class.  */
-struct port_class *trivfs_protid_class;
-
 static error_t
 allowed (mach_port_t port, int mode)
 {
-  struct trivfs_protid *cred
-    = ports_lookup_port (0, port, trivfs_protid_class);
+  struct trivfs_protid *cred = ports_lookup_port
+    (0, port, trivfs_protid_portclasses[0]);
   if (!cred)
     return MIG_BAD_ID;
   error_t result = (cred->po->openmodes & mode) ? 0 : EACCES;
@@ -236,16 +233,10 @@ int
 proxy_defpager_demuxer (mach_msg_header_t *inp,
 			mach_msg_header_t *outp)
 {
-  mig_routine_t routine;
-  if ((routine = default_pager_server_routine (inp)) ||
-      (routine = NULL, trivfs_demuxer (inp, outp)))
-    {
-      if (routine)
-        (*routine) (inp, outp);
-      return TRUE;
-    }
-  else
-    return FALSE;
+  extern int default_pager_server (mach_msg_header_t *, mach_msg_header_t *);
+
+  return default_pager_server (inp, outp)
+    || trivfs_demuxer (inp, outp);
 }
 
 int
@@ -275,12 +266,8 @@ main (int argc, char **argv)
 
   trivfs_fsid = getpid ();
 
-  err = trivfs_add_protid_port_class (&trivfs_protid_class);
-  if (err)
-    error (1, 0, "error creating protid port class");
-
   /* Reply to our parent.  */
-  err = trivfs_startup (bootstrap, 0, 0, 0, trivfs_protid_class, 0, &fsys);
+  err = trivfs_startup (bootstrap, 0, 0, 0, 0, 0, &fsys);
   mach_port_deallocate (mach_task_self (), bootstrap);
   if (err)
     error (4, err, "Contacting parent");

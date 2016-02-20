@@ -49,7 +49,7 @@
  */
  
 #ifdef CONFIG_NET_SECURITY
-static __inline__ int ipsec_sk_policy(struct sock *sk, struct sk_buff *skb)
+extern __inline__ int ipsec_sk_policy(struct sock *sk, struct sk_buff *skb)
 {
 	return ((sk->authentication < IPSEC_LEVEL_REQUIRE) ||
 		(skb->security & RCV_AUTH)) &&
@@ -59,7 +59,7 @@ static __inline__ int ipsec_sk_policy(struct sock *sk, struct sk_buff *skb)
 
 #else
 
-static __inline__ int ipsec_sk_policy(struct sock *sk, struct sk_buff *skb)
+extern __inline__ int ipsec_sk_policy(struct sock *sk, struct sk_buff *skb)
 {
 	return 1;
 }

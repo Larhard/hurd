@@ -25,15 +25,17 @@
 
 #ifdef DEBUG 
 
-#define devnode_debug(format, ...) do			\
+#define debug(format, ...) do				\
 {							\
-  fprintf (stderr , "devnode: " format, ## __VA_ARGS__);\
+  char buf[1024];                                       \
+  snprintf (buf, 1024, "devnode: %s", format);       \
+  fprintf (stderr , buf, ## __VA_ARGS__);		\
   fflush (stderr);					\
 } while (0)
 
 #else
 
-#define devnode_debug(format, ...) do {} while (0)
+#define debug(format, ...) do {} while (0)
 
 #endif
 

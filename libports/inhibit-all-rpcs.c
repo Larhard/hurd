@@ -33,6 +33,7 @@ ports_inhibit_all_rpcs ()
     err = EBUSY;
   else
     {
+      struct port_bucket *bucket;
       int this_one = 0;
 
       pthread_rwlock_rdlock (&_ports_htable_lock);

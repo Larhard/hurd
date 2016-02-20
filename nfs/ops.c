@@ -1819,7 +1819,7 @@ netfs_get_dirents (struct iouser *cred, struct node *np,
 		   mach_msg_type_number_t *datacnt,
 		   vm_size_t bufsiz, int *amt)
 {
-  void *buf = NULL;
+  void *buf;
   size_t our_bufsiz, allocsize;
   void *bp;
   char *userdp;

@@ -1,6 +1,6 @@
 /* GNU Hurd standard exec server.
-   Copyright (C) 1992,93,94,95,96,98,99,2000,01,02,04
-   	Free Software Foundation, Inc.
+   Copyright (C) 1992 ,1993, 1994, 1995, 1996, 1998, 1999, 2000, 2001,
+   2002, 2004, 2010 Free Software Foundation, Inc.
    Written by Roland McGrath.
 
    Can exec ELF format directly.
@@ -686,36 +686,6 @@ finish (struct execdata *e, int dealloc_file)
     }
 }
 
-/* Set the name of the new task so that the kernel can use it in error
-   messages.  If PID is not zero, it will be included the name.  */
-static void
-set_name (task_t task, const char *exec_name, pid_t pid)
-{
-  char *name;
-  int size;
-
-  if (pid)
-    size = asprintf (&name, "%s(%d)", exec_name, pid);
-  else
-    size = asprintf (&name, "%s", exec_name);
-
-  if (size == 0)
-    return;
-
-  /* This is an internal implementational detail of the GNU Mach kernel.  */
-#define TASK_NAME_SIZE	32
-  if (size < TASK_NAME_SIZE)
-    task_set_name (task, name);
-  else
-    {
-      char *abbr = name + size - TASK_NAME_SIZE + 1;
-      abbr[0] = abbr[1] = abbr[2] = '.';
-      task_set_name (task, abbr);
-    }
-#undef TASK_NAME_SIZE
-
-  free (name);
-}
 
 /* Load the file.  */
 static void
@@ -764,6 +734,7 @@ static error_t
 do_exec (file_t file,
 	 task_t oldtask,
 	 int flags,
+	 char *filename,
 	 char *argv, mach_msg_type_number_t argvlen, boolean_t argv_copy,
 	 char *envp, mach_msg_type_number_t envplen, boolean_t envp_copy,
 	 mach_port_t *dtable, mach_msg_type_number_t dtablesize,
@@ -822,7 +793,7 @@ do_exec (file_t file,
     {
       /* Check for a #! executable file.  */
       check_hashbang (&e,
-		      file, oldtask, flags,
+		      file, oldtask, flags, filename,
 		      argv, argvlen, argv_copy,
 		      envp, envplen, envp_copy,
 		      dtable, dtablesize, dtable_copy,
@@ -1203,10 +1174,24 @@ do_exec (file_t file,
       if (e.error)
 	goto out;
 
-      set_name (newtask, argv, pid);
+      char *name;
+      int size = asprintf (&name, "%s(%d)", argv, pid);
+      if (size > 0)
+	{
+/* This is an internal implementational detail of the gnumach kernel.  */
+#define TASK_NAME_SIZE	32
+	  if (size < TASK_NAME_SIZE)
+	    task_set_name (newtask, name);
+	  else
+	    {
+	      char *abbr = name + size - TASK_NAME_SIZE + 1;
+	      abbr[0] = abbr[1] = abbr[2] = '.';
+	      task_set_name (newtask, abbr);
+	    }
+#undef TASK_NAME_SIZE
+	  free (name);
+	}
     }
-  else
-    set_name (newtask, argv, 0);
 
   /* Create the initial thread.  */
   e.error = thread_create (newtask, &thread);
@@ -1405,6 +1390,7 @@ do_exec (file_t file,
   return e.error;
 }
 
+/* Deprecated.  */
 kern_return_t
 S_exec_exec (struct trivfs_protid *protid,
 	     file_t file,
@@ -1421,13 +1407,51 @@ S_exec_exec (struct trivfs_protid *protid,
 	     mach_port_t *deallocnames, mach_msg_type_number_t ndeallocnames,
 	     mach_port_t *destroynames, mach_msg_type_number_t ndestroynames)
 {
+  return S_exec_exec_file_name (protid,
+				file,
+				oldtask,
+				flags,
+				"",
+				argv, argvlen, argv_copy,
+				envp, envplen, envp_copy,
+				dtable, dtablesize,
+				dtable_copy,
+				portarray, nports,
+				portarray_copy,
+				intarray, nints,
+				intarray_copy,
+				deallocnames, ndeallocnames,
+				destroynames, ndestroynames);
+}
+
+kern_return_t
+S_exec_exec_file_name (struct trivfs_protid *protid,
+		       file_t file,
+		       task_t oldtask,
+		       int flags,
+		       char *filename,
+		       char *argv, mach_msg_type_number_t argvlen,
+		       boolean_t argv_copy,
+		       char *envp, mach_msg_type_number_t envplen,
+		       boolean_t envp_copy,
+		       mach_port_t *dtable, mach_msg_type_number_t dtablesize,
+		       boolean_t dtable_copy,
+		       mach_port_t *portarray, mach_msg_type_number_t nports,
+		       boolean_t portarray_copy,
+		       int *intarray, mach_msg_type_number_t nints,
+		       boolean_t intarray_copy,
+		       mach_port_t *deallocnames,
+		       mach_msg_type_number_t ndeallocnames,
+		       mach_port_t *destroynames,
+		       mach_msg_type_number_t ndestroynames)
+{
   if (! protid)
     return EOPNOTSUPP;
 
   /* There were no user-specified exec servers,
      or none of them could be found.  */
 
-  return do_exec (file, oldtask, flags,
+  return do_exec (file, oldtask, flags, filename,
 		  argv, argvlen, argv_copy,
 		  envp, envplen, envp_copy,
 		  dtable, dtablesize, dtable_copy,

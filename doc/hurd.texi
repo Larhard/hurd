@@ -102,7 +102,7 @@ This file documents the GNU Hurd kernel component.  This edition of the
 documentation was last updated for version @value{VERSION} of the Hurd.
 
 Copyright @copyright{} 1994, 1996, 1998, 1999, 2000, 2001, 2002, 2003,
-2004, 2005, 2007, 2008, 2009 Free Software Foundation, Inc.
+2004, 2005, 2007, 2008, 2009, 2010 Free Software Foundation, Inc.
 
 @quotation
 Permission is granted to make and distribute verbatim copies of
@@ -314,9 +314,6 @@ File Transfer Protocol
 
 Networking
 
-* pfinet::			TCP/IP stack.
-* pflocal::
-* libpipe::
 * Socket Interface::            Network communication I/O protocol.
 
 Authentication
@@ -389,7 +386,7 @@ libraries they use.  At that point, you should be able to study the
 source code of existing Hurd servers and understand how they use the
 Hurd libraries.
 
-The final level of mastery is learning about the RPC interfaces
+The final level of mastery is learning the about the RPC interfaces
 which the Hurd libraries implement.  The last section of each chapter
 describes any Hurd interfaces used in that subsystem.  Those sections
 assume that you are perusing the referenced interface definitions as you
@@ -569,7 +566,7 @@ The @option{--multiboot-command-line} option tells the file system server that
 it is a root filesystem, which triggers it to run @command{/hurd/startup} as PID
 2.  @command{/hurd/startup} starts the @command{/hurd/proc} and
 @command{/hurd/auth} servers.  After the servers are launched
-@command{/hurd/startup} starts the @command{/libexec/runsystem.sh} script to
+@command{/hurd/startup} starts the @command{/etc/hurd/runsystem.sh} script to
 finish booting.
 
 After the Hurd has been booted, other sets of core Hurd servers can be
@@ -673,19 +670,18 @@ $ @kbd{boot -d -D /mnt -I /mnt/boot/servers.boot /dev/hd2s1}
 See @pxref{Invoking boot} for help with boot.
 @end enumerate
 
-If you do not know what you are doing, sharing microkernel devices
-between two running hurds could cause serious harm.  For example, two
-hurds with two filesystems writing to the same partition will wreak
-havoc.  In the same way, two hurds reading from the same terminal
-device will not share nicely.
+Note that it is impossible to share microkernel devices between the two
+running Hurds, so don't get any funny ideas.  When you're finished
+testing your new Hurd, then you can run the @command{halt} or @command{reboot}
+programs to return control to the parent Hurd.
 
-However, sharing is possible for network devices. The different pfinet
-instances will just pick the packets applying to them, based on
-IP. There is also a proper user-space multiplexer for network devices
-now, called eth-multiplexer. This is only needed though if you also
-want to allow network traffic between the Hurd instances uning the
-device in question, rather than just each of them communicating with
-other machines.
+@c FIXME: the `don't get any funny ideas' comment is confusing.  Am
+@c I genuinely in some sort of danger if I contemplate sharing
+@c microkernel devices between two running Hurds?
+@c  tb: not if you know what you are doing.  But there is no clever
+@c  device mediation going on.  Two hurds, with two filesystems writing
+@c  the same partition, will wreak havoc.  Two hurds reading from the
+@c  same terminal device will not share nicely.
 
 If you're satisfied with your new Hurd, you can arrange for your
 bootloader to start it, and reboot your machine.  Then, you'll be in a
@@ -774,10 +770,8 @@ If neither @option{--interleave} or @option{--layer} is specified, multiple
 @scindex halt
 @scindex reboot
 
-You can shut down your GNU/Hurd machine by typing
+FIXME: finish
 
-$ @kbd{su}
-# @kbd{halt}
 
 @node Foundations
 @chapter Foundations
@@ -826,8 +820,11 @@ the microkernel and the underlying hardware.  The Hurd threads library,
 @code{libthreads}, contains the default Hurd thread implementation, which
 is declared in @code{<cthreads.h>}.
 
-The Hurd uses POSIX pthreads, which are documented in a lot of places.
+Currently (April 1998), the Hurd uses cthreads, which have already been
+documented thoroughly by CMU.  Eventually, it will be migrated to use
+POSIX pthreads, which are documented in a lot of places.
 @c Thomas, 26-03-1998
+
 @c FIXME: it would be nice if we referred specifically to some of
 @c the places in which POSIX pthreads are documented.
 @c  tb: yes, but alas we are only allowed to refer to free
@@ -2321,6 +2318,17 @@ The functions and variables described in this subsection already have
 default definitions in @code{libtrivfs}, so you are not forced to define
 them; rather, they may be redefined on a case-by-case basis.
 
+@deftypevar {extern struct port_class *} trivfs_protid_portclasses []
+@deftypevarx {extern int} trivfs_protid_nportclasses
+@deftypevarx {extern struct port_class *} trivfs_cntl_portclasses []
+@deftypevarx {extern int} trivfs_cntl_nportclasses
+If you define these, they should be vectors (and the associated sizes)
+of port classes that will be translated into control and protid pointers
+for passing to RPCs, in addition to those passed to or created by
+@code{trivfs_create_control} (or @code{trivfs_startup}), which will
+automatically be recognized.
+@end deftypevar
+
 @deftypefn {Variable} error_t {(*trivfs_check_open_hook)} (@w{struct trivfs_control *@var{cntl}}, @w{struct iouser *@var{user}}, @w{int @var{flags}})
 If this variable is non-zero, it will be called every time an open happens.
 @var{user} and @var{flags} are from the open; @var{cntl} identifies the
@@ -2729,10 +2737,10 @@ write the file.
 @node Program Execution
 @subsection Program Execution
 
-@findex file_exec
+@findex file_exec_file_name
 Execution of programs on the Hurd is done through fileservers with the
-@code{file_exec} RPC.  The fileserver is expected to verify that the
-user is allowed to execute the file, make whatever modifications to the
+@code{file_exec_file_name} RPC.  The fileserver is expected to verify that
+the user is allowed to execute the file, make whatever modifications to the
 ports are necessary for setuid execution, and then invoke the standard
 execserver found on @file{/servers/exec}.
 
@@ -2744,13 +2752,13 @@ The file must be opened for execution; if it is not, @code{EBADF} should
 be returned.  In addition, at least one of the execute bits must be on.  A
 failure of this check should result in @code{EACCES}---not
 @code{ENOEXEC}.  It is not proper for the fileserver ever to respond to
-the @code{file_exec} RPC with @code{ENOEXEC}.
+the @code{file_exec_file_name} RPC with @code{ENOEXEC}.
 
 If either the setuid or setgid bits are set, the server needs to
 construct a new authentication handle with the additional new ID's.
-Then all the ports passed to @code{file_exec} need to be reauthenticated
-with the new handle.  If the fileserver is unable to make the new
-authentication handle (for example, because it is not running as root)
+Then all the ports passed to @code{file_exec_file_name} need to be
+reauthenticated with the new handle.  If the fileserver is unable to make the
+new authentication handle (for example, because it is not running as root)
 it is not acceptable to return an error; in such a case the server
 should simply silently fail to implement the setuid/setgid semantics.
 
@@ -2758,14 +2766,14 @@ If the setuid/setgid transformation adds a new uid or gid to the user's
 authentication handle that was not previously present (as opposed to
 merely reordering them), then the @code{EXEC_SECURE} and
 @code{EXEC_NEWTASK} flags should both be added in the call to
-@code{exec_exec}.
+@code{exec_exec_file_name}.
 
 The server then needs to open a new port onto the executed file which
 will not share any file pointers with the port the user passed in,
 opened with @code{O_READ}.  Finally, all the information (mutated
 appropriately for setuid/setgid) should be sent to the execserver with
-@code{exec_exec}.  Whatever error code @code{exec_exec} returns should
-returned to the caller of @code{file_exec}.
+@code{exec_exec_file_name}.  Whatever error code @code{exec_exec_file_name}
+returns should be returned to the caller of @code{file_exec_file_name}.
 
 @node File Locking
 @subsection File Locking
@@ -2899,14 +2907,6 @@ FIXME: finish
 @node Special Files
 @chapter Special Files
 
-@menu
-* fifo::
-* ifsock::
-* magic::
-* null::
-* devnode::
-@end menu
-
 In Unix, any file that does not act as a general-purpose unit of storage
 is called a @dfn{special file}.  These are FIFOs, Unix-domain sockets,
 and device nodes.  In the Hurd, there is no need for the ``special
@@ -2925,57 +2925,10 @@ storeio server (FIXME xref).
 
 FIXME: finish
 
-@node fifo
 @section fifo
-
-@node ifsock
 @section ifsock
-
-@node magic
 @section magic
-
-@node null
 @section null
-
-@node devnode
-@section devnode
-
-@menu
-* Invoking devnode::
-@end menu
-
-@dfn{devnode} is a translator that creates the device file for the device,
-which provides another way for other programs to open the device.
-
-Clients need to get the port to the @dfn{devnode} translator by calling
-@dfn{file_name_lookup}() and uses this port as a master device port to open
-the device by calling @dfn{device_open}(). The device name used in
-@dfn{device_open}() is specified by @option{--name} of @dfn{devnode}.
-
-@node Invoking devnode
-@subsection Invoking devnode
-
-Usage: devnode [@var{option}@dots{}]
-
-@table @code
-@item --name=@var{devicename}
-@itemx -n
-Define the device name used by clients in device_open().
-
-@item --master-device=@var{devicefile}
-@itemx -M
-Get a pseudo master device port
-
-@end table
-
-Mandatory or optional arguments to long options are also mandatory or optional
-for any corresponding short options.
-
-If @option{--name} is specified, the client must use the device name in
-@dfn{device_open}. Otherwise, any device name is acceptable.
-
-@option{--master-device} can be useful to open the virtual interface
-created by some other programs, for example by eth-multiplexer.
 
 
 FIXME: a chapter on libtreefs and libdirmgt will probably go here
@@ -3827,6 +3780,10 @@ new thread and (eventually) get rid of the old one; the old thread won't
 do any more syncs, regardless.
 @end deftypefun
 
+@deftypevar spin_lock_t diskfs_node_refcnt_lock
+Pager reference count lock.
+@end deftypevar
+
 @deftypevar int diskfs_readonly
 Set to zero if the filesystem is currently writable.
 @end deftypevar
@@ -3861,7 +3818,9 @@ Every file or directory is a diskfs @dfn{node}.  The following functions
 help your diskfs callbacks manage nodes and their references:
 
 @deftypefun void diskfs_drop_node (@w{struct node *@var{np}})
-Node @var{np} now has no more references; clean all state.
+Node @var{np} now has no more references; clean all state.  The
+@var{diskfs_node_refcnt_lock} must be held, and will be released upon
+return.  @var{np} must be locked.
 @end deftypefun
 
 @deftypefun void diskfs_node_update (@w{struct node *@var{np}}, @w{int @var{wait}})
@@ -4277,13 +4236,14 @@ without real users.
 @deftypefun void diskfs_try_dropping_softrefs (@w{struct node *@var{np}})
 Node @var{np} has some light references, but has just lost its last hard
 references.  Take steps so that if any light references can be freed,
-they are.  @var{np} is locked.
+they are.  Both @var{diskfs_node_refcnt_lock} and @var{np} are locked.
 This function will be called after @code{diskfs_lost_hardrefs}.
 @end deftypefun
 
 @deftypefun void diskfs_node_norefs (@w{struct node *@var{np}})
 Node @var{np} has no more references; free local state, including
 @code{*@var{np}} if it shouldn't be retained.
+@var{diskfs_node_refcnt_lock} is held.
 @end deftypefun
 
 @deftypefun error_t diskfs_set_hypermetadata (@w{int @var{wait}}, @w{int @var{clean}})
@@ -4597,19 +4557,12 @@ FIXME: finish
 FIXME: this subsystem is in flux @c Thomas, 26-03-1998
 
 @menu
-* pfinet::			TCP/IP stack.
-* pflocal::
-* libpipe::
 * Socket Interface::            Network communication I/O protocol.
 @end menu
 
-@node pfinet
+
 @section pfinet
-
-@node pflocal
 @section pflocal
-
-@node libpipe
 @section libpipe
 
 @node Socket Interface

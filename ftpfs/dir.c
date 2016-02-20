@@ -30,31 +30,72 @@
 void
 free_entry (struct ftpfs_dir_entry *e)
 {
-  assert (e->deleted);
+  assert (! e->self_p);		/* We should only free deleted nodes.  */
   free (e->name);
   if (e->symlink_target)
     free (e->symlink_target);
   free (e);
 }
 
-/* Calculate NAME_PTR's hash value.  */
-static hurd_ihash_key_t
-ihash_hash (const void *name_ptr)
+/* Put the directory entry E into the hash table HTABLE, of length HTABLE_LEN.  */
+static void
+insert (struct ftpfs_dir_entry *e,
+	struct ftpfs_dir_entry **htable, size_t htable_len)
 {
-  const char *name = (const char *) name_ptr;
-  return (hurd_ihash_key_t) hurd_ihash_hash32 (name, strlen (name), 0);
+  struct ftpfs_dir_entry **t = &htable[e->hv % htable_len];
+  if (*t)
+    (*t)->self_p = &e->next;
+  e->next = *t;
+  e->self_p = t;
+  *t = e;
 }
-
-/* Compare two names which are used as keys.  */
-static int
-ihash_compare (const void *key1, const void *key2)
-{
-  const char *name1 = (const char *) key1;
-  const char *name2 = (const char *) key2;
 
-  return strcmp (name1, name2) == 0;
+/* Replace DIR's hashtable with a new one of length NEW_LEN, retaining all
+   existing entries.  */
+static error_t
+rehash (struct ftpfs_dir *dir, size_t new_len)
+{
+  int i;
+  size_t old_len = dir->htable_len;
+  struct ftpfs_dir_entry **old_htable = dir->htable;
+  struct ftpfs_dir_entry **new_htable =
+    malloc (new_len * sizeof (struct ftpfs_dir_entry *));
+
+  if (! new_htable)
+    return ENOMEM;
+
+  memset (new_htable, 0, new_len * sizeof(struct ftpfs_dir_entry *));
+
+  for (i = 0; i < old_len; i++)
+    while (old_htable[i])
+      {
+	struct ftpfs_dir_entry *e = old_htable[i];
+
+	/* Remove E from the old table (don't bother to fixup
+	   e->next->self_p).  */
+	old_htable[i] = e->next;
+
+	insert (e, new_htable, new_len);
+      }
+
+  free (old_htable);
+
+  dir->htable = new_htable;
+  dir->htable_len = new_len;
+
+  return 0;
 }
 
+/* Calculate NAME's hash value.  */
+static size_t
+hash (const char *name)
+{
+  size_t hv = 0;
+  while (*name)
+    hv = ((hv << 5) + *name++) & 0xFFFFFF;
+  return hv;
+}
+
 /* Lookup NAME in DIR and return its entry.  If there is no such entry, and
    ADD is true, then a new entry is allocated and returned, otherwise 0 is
    returned (if ADD is true then 0 can be returned if a memory allocation
@@ -62,14 +103,23 @@ ihash_compare (const void *key1, const void *key2)
 struct ftpfs_dir_entry *
 lookup (struct ftpfs_dir *dir, const char *name, int add)
 {
-  struct ftpfs_dir_entry *e =
-    hurd_ihash_find (&dir->htable, (hurd_ihash_key_t) name);
+  size_t hv = hash (name);
+  struct ftpfs_dir_entry *h = dir->htable[hv % dir->htable_len], *e = h;
+
+  while (e && strcmp (name, e->name) != 0)
+    e = e->next;
 
   if (!e && add)
     {
+      if (dir->num_entries > dir->htable_len)
+	/* Grow the hash table.  */
+	if (rehash (dir, (dir->htable_len + 1) * 2 - 1) != 0)
+	  return 0;
+
       e = malloc (sizeof *e);
       if (e)
 	{
+	  e->hv = hv;
 	  e->name = strdup (name);
 	  e->node = 0;
 	  e->dir = dir;
@@ -78,11 +128,13 @@ lookup (struct ftpfs_dir *dir, const char *name, int add)
 	  e->symlink_target = 0;
 	  e->noent = 0;
 	  e->valid = 0;
-          e->deleted = 0;
 	  e->name_timestamp = e->stat_timestamp = 0;
 	  e->ordered_next = 0;
 	  e->ordered_self_p = 0;
-          hurd_ihash_add (&dir->htable, (hurd_ihash_key_t) e->name, e);
+	  e->next = 0;
+	  e->self_p = 0;
+	  insert (e, dir->htable, dir->htable_len);
+	  dir->num_entries++;
 	}
     }
 
@@ -96,20 +148,27 @@ ordered_unlink (struct ftpfs_dir_entry *e)
   if (e->ordered_self_p)
     *e->ordered_self_p = e->ordered_next;
   if (e->ordered_next)
-    e->ordered_next->ordered_self_p = e->ordered_self_p;
+    e->ordered_next->self_p = e->ordered_self_p;
 }
-
+
 /* Delete E from its directory, freeing any resources it holds.  */
 static void
 delete (struct ftpfs_dir_entry *e, struct ftpfs_dir *dir)
 {
+  dir->num_entries--;
+
+  /* Take out of the hash chain.  */
+  if (e->self_p)
+    *e->self_p = e->next;
+  if (e->next)
+    e->next->self_p = e->self_p;
+
   /* This indicates a deleted entry.  */
-  e->deleted = 1;
+  e->self_p = 0;
+  e->next = 0;
 
   /* Take out of the directory ordered list.  */
   ordered_unlink (e);
-
-  hurd_ihash_locp_remove (&dir->htable, e->dir_locp);
 
   /* If there's a node attached, we'll delete the entry whenever it goes
      away, otherwise, just delete it now.  */
@@ -121,23 +180,25 @@ delete (struct ftpfs_dir_entry *e, struct ftpfs_dir *dir)
 static void
 mark (struct ftpfs_dir *dir)
 {
-  HURD_IHASH_ITERATE (&dir->htable, value)
-    {
-      struct ftpfs_dir_entry *e = (struct ftpfs_dir_entry *) value;
+  size_t len = dir->htable_len, i;
+  struct ftpfs_dir_entry **htable = dir->htable, *e;
+
+  for (i = 0; i < len; i++)
+    for (e = htable[i]; e; e = e->next)
       e->valid = 0;
-    }
 }
-
+
 /* Delete any entries in DIR which don't have their valid bit set.  */
 static void
 sweep (struct ftpfs_dir *dir)
 {
-  HURD_IHASH_ITERATE (&dir->htable, value)
-    {
-      struct ftpfs_dir_entry *e = (struct ftpfs_dir_entry *) value;
+  size_t len = dir->htable_len, i;
+  struct ftpfs_dir_entry **htable = dir->htable, *e;
+
+  for (i = 0; i < len; i++)
+    for (e = htable[i]; e; e = e->next)
       if (!e->valid && !e->noent)
-        delete (e, dir);
-    }
+	delete (e, dir);
 }
 
 /* Update the directory entry for NAME to reflect ST and SYMLINK_TARGET.
@@ -405,7 +466,7 @@ ftpfs_refresh_node (struct node *node)
 
       pthread_mutex_lock (&dir->node->lock);
 
-      if (entry->deleted)
+      if (! entry->self_p)
 	/* This is a deleted entry, just awaiting disposal; do so.  */
 	{
 	  nn->dir_entry = 0;
@@ -511,7 +572,7 @@ ftpfs_detach_node (struct node *node)
 
       pthread_mutex_lock (&dir->node->lock);
 
-      if (! entry->deleted)
+      if (entry->self_p)
 	/* Just detach NODE from the still active entry.  */
 	entry->node = 0;
       else
@@ -776,10 +837,15 @@ ftpfs_dir_create (struct ftpfs *fs, struct node *node, const char *rmt_path,
 		  struct ftpfs_dir **dir)
 {
   struct ftpfs_dir *new = malloc (sizeof (struct ftpfs_dir));
+  struct ftpfs_dir_entry **htable
+    = calloc (INIT_HTABLE_LEN, sizeof (struct ftpfs_dir_entry *));
 
-  if (! new)
+  if (!new || !htable)
     {
-      free (new);
+      if (new)
+	free (new);
+      if (htable)
+	free (htable);
       return ENOMEM;
     }
 
@@ -788,9 +854,10 @@ ftpfs_dir_create (struct ftpfs *fs, struct node *node, const char *rmt_path,
   node->references++;
   pthread_spin_unlock (&netfs_node_refcnt_lock);
 
-  hurd_ihash_init (&new->htable, offsetof (struct ftpfs_dir_entry, dir_locp));
-  hurd_ihash_set_gki (&new->htable, ihash_hash, ihash_compare);
+  new->num_entries = 0;
   new->num_live_entries = 0;
+  new->htable_len = INIT_HTABLE_LEN;
+  new->htable = htable;
   new->ordered = 0;
   new->rmt_path = rmt_path;
   new->fs = fs;
@@ -813,7 +880,8 @@ ftpfs_dir_free (struct ftpfs_dir *dir)
   mark (dir);
   sweep (dir);
 
-  hurd_ihash_destroy (&dir->htable);
+  if (dir->htable)
+    free (dir->htable);
 
   netfs_nrele (dir->node);
 

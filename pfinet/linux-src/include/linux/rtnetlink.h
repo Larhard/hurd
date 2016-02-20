@@ -515,7 +515,7 @@ enum
 extern atomic_t rtnl_rlockct;
 extern struct wait_queue *rtnl_wait;
 
-static __inline__ int rtattr_strcmp(struct rtattr *rta, char *str)
+extern __inline__ int rtattr_strcmp(struct rtattr *rta, char *str)
 {
 	int len = strlen(str) + 1;
 	return len > rta->rta_len || memcmp(RTA_DATA(rta), str, len);
@@ -563,7 +563,7 @@ extern unsigned long rtnl_wlockct;
  * useful thing. --ANK
  */
 
-static __inline__ int rtnl_shlock_nowait(void)
+extern __inline__ int rtnl_shlock_nowait(void)
 {
 	atomic_inc(&rtnl_rlockct);
 	if (test_bit(0, &rtnl_wlockct)) {
@@ -573,7 +573,7 @@ static __inline__ int rtnl_shlock_nowait(void)
 	return 0;
 }
 
-static __inline__ void rtnl_shlock(void)
+extern __inline__ void rtnl_shlock(void)
 {
 	while (rtnl_shlock_nowait())
 		sleep_on(&rtnl_wait);
@@ -583,7 +583,7 @@ static __inline__ void rtnl_shlock(void)
    Shared lock must be already grabbed with rtnl_shlock*().
  */
 
-static __inline__ int rtnl_exlock_nowait(void)
+extern __inline__ int rtnl_exlock_nowait(void)
 {
 	if (atomic_read(&rtnl_rlockct) > 1)
 		return -EAGAIN;
@@ -592,14 +592,14 @@ static __inline__ int rtnl_exlock_nowait(void)
 	return 0;
 }
 
-static __inline__ void rtnl_exlock(void)
+extern __inline__ void rtnl_exlock(void)
 {
 	while (rtnl_exlock_nowait())
 		sleep_on(&rtnl_wait);
 }
 
 #if 0
-static __inline__ void rtnl_shunlock(void)
+extern __inline__ void rtnl_shunlock(void)
 {
 	atomic_dec(&rtnl_rlockct);
 	if (atomic_read(&rtnl_rlockct) <= 1) {
@@ -628,7 +628,7 @@ static __inline__ void rtnl_shunlock(void)
  * it will be done later after releasing shared lock.
  */
 
-static __inline__ void rtnl_exunlock(void)
+extern __inline__ void rtnl_exunlock(void)
 {
 	clear_bit(0, &rtnl_wlockct);
 	wake_up(&rtnl_wait);
@@ -636,7 +636,7 @@ static __inline__ void rtnl_exunlock(void)
 
 #else
 
-static __inline__ void rtnl_shlock(void)
+extern __inline__ void rtnl_shlock(void)
 {
 #ifndef _HURD_
 	while (atomic_read(&rtnl_rlockct))
@@ -645,7 +645,7 @@ static __inline__ void rtnl_shlock(void)
 #endif
 }
 
-static __inline__ void rtnl_shunlock(void)
+extern __inline__ void rtnl_shunlock(void)
 {
 #ifndef _HURD_
 	if (atomic_dec_and_test(&rtnl_rlockct))
@@ -653,11 +653,11 @@ static __inline__ void rtnl_shunlock(void)
 #endif
 }
 
-static __inline__ void rtnl_exlock(void)
+extern __inline__ void rtnl_exlock(void)
 {
 }
 
-static __inline__ void rtnl_exunlock(void)
+extern __inline__ void rtnl_exunlock(void)
 {
 }
 

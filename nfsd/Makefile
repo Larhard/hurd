@@ -25,7 +25,7 @@ OBJS = $(subst .c,.o,$(SRCS))
 target = nfsd
 installationdir = $(sbindir)
 HURDLIBS = shouldbeinlibc
-LDLIBS = -lpthread
+OTHERLIBS = -lpthread
 
 include ../Makeconf
 

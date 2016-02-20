@@ -43,7 +43,6 @@ netfs_S_io_restrict_auth (struct protid *user,
     return err;
 
   pthread_mutex_lock (&user->po->np->lock);
-  refcount_ref (&user->po->refcnt);
   newpi = netfs_make_protid (user->po, new_user);
   if (newpi)
     {
@@ -53,7 +52,6 @@ netfs_S_io_restrict_auth (struct protid *user,
     }
   else
     {
-      refcount_deref (&user->po->refcnt);
       pthread_mutex_unlock (&user->po->np->lock);
       iohelp_free_iouser (new_user);
       err = ENOMEM;

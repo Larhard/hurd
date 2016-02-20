@@ -130,8 +130,13 @@ diskfs_start_bootstrap ()
       assert (_hurd_ports);
       assert (_hurd_ports[INIT_PORT_CRDIR].port != MACH_PORT_NULL);
       diskfs_exec = file_name_lookup (_SERVERS_EXEC, 0, 0);
-      if (diskfs_exec == MACH_PORT_NULL)
-	error (1, errno, "%s", _SERVERS_EXEC);
+      if (diskfs_exec == MACH_PORT_NULL) 
+	{
+	  /* Debian specifc work-around for install bootstrapping.  */
+	  diskfs_exec = file_name_lookup ("/tmp/exec", 0, 0);
+	  if (diskfs_exec == MACH_PORT_NULL)
+	    error (1, errno, "%s", _SERVERS_EXEC);
+	}
       else
 	{
 #ifndef NDEBUG
@@ -181,8 +186,15 @@ diskfs_start_bootstrap ()
 			&retry, retry_name, &execnode);
       if (err)
 	{
-	  error (0, err, "cannot set translator on %s", _SERVERS_EXEC);
-	  mach_port_deallocate (mach_task_self (), diskfs_exec_ctl);
+          /* If /servers/exec is not available (which is the case during
+             installation, try /tmp/exec as well.  */
+          err = dir_lookup (root_pt, "/tmp/exec", O_NOTRANS, 0,
+	            	    &retry, pathbuf, &execnode);
+	  if (err) 
+	    {
+	      error (0, err, "cannot set translator on %s", _SERVERS_EXEC);
+	      mach_port_deallocate (mach_task_self (), diskfs_exec_ctl);
+	    }
 	}
       else
 	{
@@ -198,7 +210,7 @@ diskfs_start_bootstrap ()
       diskfs_exec_ctl = MACH_PORT_NULL;	/* Not used after this.  */
     }
 
-  /* Cache the exec server port for file_exec to use.  */
+  /* Cache the exec server port for file_exec_file_name to use.  */
   _hurd_port_set (&_diskfs_exec_portcell, diskfs_exec);
 
   if (_diskfs_boot_command)
@@ -228,8 +240,8 @@ diskfs_start_bootstrap ()
     }
 
  lookup_init:
-  err = dir_lookup (root_pt, (char *) initname, O_READ, 0, &retry, pathbuf,
-                    &startup_pt);
+  err = dir_lookup (root_pt, initname, O_READ, 0,
+		    &retry, pathbuf, &startup_pt);
   init_lookups++;
   if (err)
     {
@@ -279,7 +291,6 @@ diskfs_start_bootstrap ()
   if (_diskfs_boot_pause)
     {
       printf ("pausing for %s...\n", exec_argv);
-      fflush (stdout);
       getc (stdin);
     }
   printf (" %s", basename (exec_argv));
@@ -408,6 +419,10 @@ diskfs_execboot_fsys_startup (mach_port_t port, int flags,
 
   err = dir_lookup (rootport, _SERVERS_EXEC, flags|O_NOTRANS, 0,
 		    &retry, pathbuf, real);
+  if (err) 
+    /* Try /tmp/exec as well, in case we're installing.  */
+    err = dir_lookup (rootport, "/tmp/exec", flags|O_NOTRANS|O_CREAT, 0,
+	  	      &retry, pathbuf, real);
   assert_perror (err);
   assert (retry == FS_RETRY_NORMAL);
   assert (pathbuf[0] == '\0');
@@ -638,19 +653,15 @@ start_execserver (void)
   assert_perror (err);
   right = ports_get_send_right (execboot_info);
   ports_port_deref (execboot_info);
-  err = task_set_special_port (diskfs_exec_server_task, TASK_BOOTSTRAP_PORT, right);
-  assert_perror (err);
-  err = mach_port_deallocate (mach_task_self (), right);
-  assert_perror (err);
+  task_set_special_port (diskfs_exec_server_task, TASK_BOOTSTRAP_PORT, right);
+  mach_port_deallocate (mach_task_self (), right);
 
   if (_diskfs_boot_pause)
     {
       printf ("pausing for exec\n");
-      fflush (stdout);
       getc (stdin);
     }
-  err = task_resume (diskfs_exec_server_task);
-  assert_perror (err);
+  task_resume (diskfs_exec_server_task);
 
   printf (" exec");
   fflush (stdout);

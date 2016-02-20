@@ -73,9 +73,10 @@ int trivfs_support_write = 0;
 int trivfs_support_exec = 0;
 int trivfs_allow_open = O_READ | O_WRITE;
 
-/* Our port classes.  */
-struct port_class *trivfs_protid_class;
-struct port_class *trivfs_cntl_class;
+struct port_class *trivfs_protid_portclasses[1];
+struct port_class *trivfs_cntl_portclasses[1];
+int trivfs_protid_nportclasses = 1;
+int trivfs_cntl_nportclasses = 1;
 
 static int
 devnode_demuxer (mach_msg_header_t *inp,
@@ -145,7 +146,7 @@ ds_device_open (mach_port_t master_port, mach_port_t reply_port,
 {
   error_t err;
 
-  devnode_debug ("ds_device_open is called\n");
+  debug ("ds_device_open is called\n");
 
   if ((user_device_name && strcmp (user_device_name, name))
       || device_name == NULL) 
@@ -153,20 +154,12 @@ ds_device_open (mach_port_t master_port, mach_port_t reply_port,
 
   if (master_file != NULL)
     {
-      mach_port_t md;
-      if (MACH_PORT_VALID (master_device))
+      if (master_device != MACH_PORT_NULL)
         mach_port_deallocate (mach_task_self (), master_device);
-      md = file_name_lookup (master_file, 0, 0);
-      if (MACH_PORT_VALID (md))
-        master_device = md;
-      else
-        {
-          error (0, 0, "%s: %s.\nFalling back to kernel driver.",
-                 master_file, strerror (errno));
-          err = get_privileged_ports (0, &master_device);
-          if (err)
-            return err;
-        }
+
+      master_device = file_name_lookup (master_file, 0, 0);
+      if (master_device == MACH_PORT_NULL)
+        error (1, errno, "file_name_lookup");
     }
 
   err = device_open (master_device, mode, device_name, device); 
@@ -277,23 +270,23 @@ trivfs_goaway (struct trivfs_control *fsys, int flags)
   int count;
 
   /* Stop new requests.  */
-  ports_inhibit_class_rpcs (trivfs_cntl_class);
-  ports_inhibit_class_rpcs (trivfs_protid_class);
+  ports_inhibit_class_rpcs (trivfs_cntl_portclasses[0]);
+  ports_inhibit_class_rpcs (trivfs_protid_portclasses[0]);
 
-  count = ports_count_class (trivfs_protid_class);
-  devnode_debug ("the number of ports alive: %d\n", count);
+  count = ports_count_class (trivfs_protid_portclasses[0]);
+  debug ("the number of ports alive: %d\n", count);
 
   if (count && !(flags & FSYS_GOAWAY_FORCE)) 
     {
       /* We won't go away, so start things going again...  */
-      ports_enable_class (trivfs_protid_class);
-      ports_resume_class_rpcs (trivfs_cntl_class);
-      ports_resume_class_rpcs (trivfs_protid_class);
+      ports_enable_class (trivfs_protid_portclasses[0]);
+      ports_resume_class_rpcs (trivfs_cntl_portclasses[0]);
+      ports_resume_class_rpcs (trivfs_protid_portclasses[0]); 
       return EBUSY;
     } 
 
   mach_port_deallocate (mach_task_self (), master_device);
-  devnode_debug ("the translator is gone away\n");
+  debug ("the translator is gone away\n");
   exit (0);
 }
 
@@ -306,8 +299,7 @@ parse_opt (int opt, char *arg, struct argp_state *state)
       master_file = arg;
       master_device = file_name_lookup (arg, 0, 0);
       if (master_device == MACH_PORT_NULL)
-	error (0, 0, "%s: %s.\nFalling back to kernel driver.",
-               arg, strerror (errno));
+	error (1, errno, "file_name_lookup");
       break;
     case 'n':
       user_device_name = arg;
@@ -334,8 +326,8 @@ main (int argc, char *argv[])
   const struct argp argp = { options, parse_opt, args_doc, doc };
 
   port_bucket = ports_create_bucket ();
-  trivfs_cntl_class = ports_create_class (trivfs_clean_cntl, 0);
-  trivfs_protid_class = ports_create_class (trivfs_clean_protid, 0);
+  trivfs_cntl_portclasses[0] = ports_create_class (trivfs_clean_cntl, 0);
+  trivfs_protid_portclasses[0] = ports_create_class (trivfs_clean_protid, 0);
 
   argp_parse (&argp, argc, argv, 0, 0, 0);
 
@@ -352,8 +344,8 @@ main (int argc, char *argv[])
 
   /* Reply to our parent.  */
   err = trivfs_startup (bootstrap, 0,
-			trivfs_cntl_class, port_bucket,
-			trivfs_protid_class, port_bucket, &fsys);
+			trivfs_cntl_portclasses[0], port_bucket,
+			trivfs_protid_portclasses[0], port_bucket, &fsys);
   mach_port_deallocate (mach_task_self (), bootstrap);
   if (err)
     error (1, err, "Contacting parent");

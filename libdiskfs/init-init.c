@@ -41,6 +41,8 @@ int _diskfs_noatime;
 
 struct hurd_port _diskfs_exec_portcell;
 
+pthread_spinlock_t diskfs_node_refcnt_lock = PTHREAD_SPINLOCK_INITIALIZER;
+
 pthread_spinlock_t _diskfs_control_lock = PTHREAD_SPINLOCK_INITIALIZER;
 int _diskfs_ncontrol_ports;
 
@@ -58,6 +60,9 @@ error_t
 diskfs_init_diskfs (void)
 {
   error_t err;
+
+  /* See `node-create.c'.  */
+  _diskfs_no_inherit_dir_group = 1;
 
   if (diskfs_boot_filesystem ())
     /* This is a boot filesystem, we have to do some things specially.  */

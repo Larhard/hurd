@@ -458,9 +458,9 @@ rmd160_write( RMD160_CONTEXT *hd, byte *inbuf, size_t inlen)
  * Returns: 16 bytes in buffer with the mixed contentes of buffer.
  */
 void
-rmd160_mixblock( RMD160_CONTEXT *hd, byte *buffer )
+rmd160_mixblock( RMD160_CONTEXT *hd, char *buffer )
 {
-    byte *p = buffer;
+    char *p = buffer;
     transform( hd, buffer );
   #define X(a) do { *(u32*)p = hd->h##a ; p += 4; } while(0)
     X(0);
@@ -536,6 +536,12 @@ rmd160_final( RMD160_CONTEXT *hd )
   #undef X
 }
 
+static byte *
+rmd160_read( RMD160_CONTEXT *hd )
+{
+    return hd->buf;
+}
+
 
 
 /****************
@@ -553,14 +559,6 @@ rmd160_hash_buffer( char *outbuf, const char *buffer, size_t length )
     memcpy( outbuf, hd.buf, 20 );
 }
 
-
-#ifndef __HURD__
-
-static byte *
-rmd160_read( RMD160_CONTEXT *hd )
-{
-    return hd->buf;
-}
 
 /****************
  * Return some information about the algorithm.  We need algo here to
@@ -645,6 +643,9 @@ gnupgext_enum_func( int what, int *sequence, int *class, int *vers )
     return ret;
 }
 
+
+
+#ifndef __HURD__
 #ifndef IS_MODULE
 void
 rmd160_constructor(void)

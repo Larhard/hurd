@@ -383,19 +383,18 @@ xdr_decode_64bit (int *p, long long *n)
 int *
 xdr_decode_fhandle (int *p, struct node **npp)
 {
-  struct fhandle handle;
+  size_t len;
 
   if (protocol_version == 2)
-    handle.size = NFS2_FHSIZE;
+    len = NFS2_FHSIZE;
   else
     {
-      handle.size = ntohl (*p);
+      len = ntohl (*p);
       p++;
     }
-  memcpy (&handle.data, p, handle.size);
   /* Enter into cache.  */
-  lookup_fhandle (&handle, npp);
-  return p + handle.size / sizeof (int);
+  lookup_fhandle (p, len, npp);
+  return p + len / sizeof (int);
 }
 
 /* Decode *P into a stat structure; return the address of the

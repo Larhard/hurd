@@ -34,10 +34,6 @@ struct port_bucket *disk_pager_bucket;
 /* A ports bucket to hold file pager ports.  */
 struct port_bucket *file_pager_bucket;
 
-/* Stores a reference to the requests instance used by the file pager so its
-   worker threads can be inhibited and resumed.  */
-struct pager_requests *file_pager_requests;
-
 pthread_spinlock_t node_to_page_lock = PTHREAD_SPINLOCK_INITIALIZER;
 
 
@@ -141,7 +137,7 @@ find_block (struct node *node, vm_offset_t offset,
 
   if (!*lock)
     {
-      *lock = &diskfs_node_disknode (node)->alloc_lock;
+      *lock = &node->dn->alloc_lock;
       pthread_rwlock_rdlock (*lock);
     }
 
@@ -283,7 +279,7 @@ file_pager_read_page (struct node *node, vm_offset_t page,
     err = do_pending_reads();
 
   if (!err && partial && !*writelock)
-    diskfs_node_disknode (node)->last_page_partially_writable = 1;
+    node->dn->last_page_partially_writable = 1;
 
   if (lock)
     pthread_rwlock_unlock (lock);
@@ -381,16 +377,16 @@ file_pager_write_page (struct node *node, vm_offset_t offset, void *buf)
 {
   error_t err = 0;
   struct pending_blocks pb;
-  pthread_rwlock_t *lock = &diskfs_node_disknode (node)->alloc_lock;
+  pthread_rwlock_t *lock = &node->dn->alloc_lock;
   block_t block;
   int left = vm_page_size;
 
   pending_blocks_init (&pb, buf);
 
-  /* Holding diskfs_node_disknode (node)->alloc_lock effectively locks NODE->allocsize,
+  /* Holding NODE->dn->alloc_lock effectively locks NODE->allocsize,
      at least for the cases we care about: pager_unlock_page,
      diskfs_grow and diskfs_truncate.  */
-  pthread_rwlock_rdlock (&diskfs_node_disknode (node)->alloc_lock);
+  pthread_rwlock_rdlock (&node->dn->alloc_lock);
 
   if (offset >= node->allocsize)
     left = 0;
@@ -415,7 +411,7 @@ file_pager_write_page (struct node *node, vm_offset_t offset, void *buf)
   if (!err)
     pending_blocks_write (&pb);
 
-  pthread_rwlock_unlock (&diskfs_node_disknode (node)->alloc_lock);
+  pthread_rwlock_unlock (&node->dn->alloc_lock);
 
   return err;
 }
@@ -433,7 +429,7 @@ disk_pager_read_page (vm_offset_t page, void **buf, int *writelock)
     + offset % block_size;
   disk_cache_info[index].flags |= DC_INCORE;
   disk_cache_info[index].flags &=~ DC_UNTOUCHED;
-#ifdef DEBUG_DISK_CACHE
+#ifndef NDEBUG
   disk_cache_info[index].last_read = disk_cache_info[index].block;
   disk_cache_info[index].last_read_xor
     = disk_cache_info[index].block ^ DISK_CACHE_LAST_READ_XOR;
@@ -469,7 +465,7 @@ disk_pager_write_page (vm_offset_t page, void *buf)
   assert (disk_cache_info[index].block != DC_NO_BLOCK);
   offset = ((store_offset_t) disk_cache_info[index].block << log2_block_size)
     + offset % block_size;
-#ifdef DEBUG_DISK_CACHE			/* Not strictly needed.  */
+#ifndef NDEBUG			/* Not strictly needed.  */
   assert ((disk_cache_info[index].last_read ^ DISK_CACHE_LAST_READ_XOR)
 	  == disk_cache_info[index].last_read_xor);
   assert (disk_cache_info[index].last_read
@@ -587,7 +583,7 @@ pager_unlock_page (struct user_pager_info *pager, vm_offset_t page)
       error_t err;
       volatile int partial_page;
       struct node *node = pager->node;
-      struct disknode *dn = diskfs_node_disknode (node);
+      struct disknode *dn = node->dn;
 
       pthread_rwlock_wrlock (&dn->alloc_lock);
 
@@ -636,7 +632,7 @@ pager_unlock_page (struct user_pager_info *pager, vm_offset_t page)
       if (err == ENOSPC)
 	ext2_warning ("This filesystem is out of space, and will now crash.  Bye!");
       else if (err)
-	ext2_warning ("inode=%Ld, page=0x%lx: %s",
+	ext2_warning ("inode=%Ld, page=0x%zx: %s",
 		      node->cache_id, page, strerror (err));
 
       return err;
@@ -660,7 +656,7 @@ diskfs_grow (struct node *node, off_t size, struct protid *cred)
       volatile off_t new_size;
       volatile block_t end_block;
       block_t new_end_block;
-      struct disknode *dn = diskfs_node_disknode (node);
+      struct disknode *dn = node->dn;
 
       pthread_rwlock_wrlock (&dn->alloc_lock);
 
@@ -745,7 +741,7 @@ diskfs_file_update (struct node *node, int wait)
   struct pager *pager;
 
   pthread_spin_lock (&node_to_page_lock);
-  pager = diskfs_node_disknode (node)->pager;
+  pager = node->dn->pager;
   if (pager)
     ports_port_ref (pager);
   pthread_spin_unlock (&node_to_page_lock);
@@ -756,7 +752,7 @@ diskfs_file_update (struct node *node, int wait)
       ports_port_deref (pager);
     }
 
-  pokel_sync (&diskfs_node_disknode (node)->indir_pokel, wait);
+  pokel_sync (&node->dn->indir_pokel, wait);
 
   diskfs_node_update (node, wait);
 }
@@ -766,7 +762,7 @@ void
 flush_node_pager (struct node *node)
 {
   struct pager *pager;
-  struct disknode *dn = diskfs_node_disknode (node);
+  struct disknode *dn = node->dn;
 
   pthread_spin_lock (&node_to_page_lock);
   pager = dn->pager;
@@ -810,9 +806,9 @@ pager_clear_user_data (struct user_pager_info *upi)
       struct pager *pager;
 
       pthread_spin_lock (&node_to_page_lock);
-      pager = diskfs_node_disknode (upi->node)->pager;
+      pager = upi->node->dn->pager;
       if (pager && pager_get_upi (pager) == upi)
-	diskfs_node_disknode (upi->node)->pager = 0;
+	upi->node->dn->pager = 0;
       pthread_spin_unlock (&node_to_page_lock);
 
       diskfs_nrele_light (upi->node);
@@ -840,49 +836,12 @@ int disk_cache_blocks;
 hurd_ihash_t disk_cache_bptr;
 /* Cached blocks' info.  */
 struct disk_cache_info *disk_cache_info;
+/* Hint index for which cache block to reuse next.  */
+int disk_cache_hint;
 /* Lock for these structures.  */
 pthread_mutex_t disk_cache_lock;
 /* Fired when a re-association is done.  */
 pthread_cond_t disk_cache_reassociation;
-
-/* Linked list of potentially unused blocks. */
-static struct disk_cache_info *disk_cache_info_free;
-static pthread_mutex_t disk_cache_info_free_lock;
-
-/* Get a reusable entry.  Must be called with disk_cache_lock
-   held.  */
-static struct disk_cache_info *
-disk_cache_info_free_pop (void)
-{
-  struct disk_cache_info *p;
-
-  do
-    {
-      pthread_mutex_lock (&disk_cache_info_free_lock);
-      p = disk_cache_info_free;
-      if (p)
-	{
-	  disk_cache_info_free = p->next;
-	  p->next = NULL;
-	}
-      pthread_mutex_unlock (&disk_cache_info_free_lock);
-    }
-  while (p && (p->flags & DC_DONT_REUSE || p->ref_count > 0));
-  return p;
-}
-
-/* Add P to the list of potentially re-usable entries.  */
-static void
-disk_cache_info_free_push (struct disk_cache_info *p)
-{
-  pthread_mutex_lock (&disk_cache_info_free_lock);
-  if (! p->next)
-    {
-      p->next = disk_cache_info_free;
-      disk_cache_info_free = p;
-    }
-  pthread_mutex_unlock (&disk_cache_info_free_lock);
-}
 
 /* Finish mapping initialization. */
 static void
@@ -894,7 +853,6 @@ disk_cache_init (void)
 
   pthread_mutex_init (&disk_cache_lock, NULL);
   pthread_cond_init (&disk_cache_reassociation, NULL);
-  pthread_mutex_init (&disk_cache_info_free_lock, NULL);
 
   /* Allocate space for block num -> in-memory pointer mapping.  */
   if (hurd_ihash_create (&disk_cache_bptr, HURD_IHASH_NO_LOCP))
@@ -905,22 +863,19 @@ disk_cache_init (void)
   if (!disk_cache_info)
     ext2_panic ("Cannot allocate space for disk cache info");
 
-  /* Initialize disk_cache_info.  Start with the last entry so that
-     the first ends up at the front of the free list.  This keeps the
-     assertions at the end of this function happy.  */
-  for (int i = disk_cache_blocks; i >= 0; i--)
+  /* Initialize disk_cache_info.  */
+  for (int i = 0; i < disk_cache_blocks; i++)
     {
       disk_cache_info[i].block = DC_NO_BLOCK;
       disk_cache_info[i].flags = 0;
       disk_cache_info[i].ref_count = 0;
-      disk_cache_info[i].next = NULL;
-      disk_cache_info_free_push (&disk_cache_info[i]);
-#ifdef DEBUG_DISK_CACHE
+#ifndef NDEBUG
       disk_cache_info[i].last_read = DC_NO_BLOCK;
       disk_cache_info[i].last_read_xor
 	= DC_NO_BLOCK ^ DISK_CACHE_LAST_READ_XOR;
 #endif
     }
+  disk_cache_hint = 0;
 
   /* Map the superblock and the block group descriptors.  */
   block_t fixed_first = boffs_block (SBLOCK_OFFS);
@@ -988,7 +943,7 @@ disk_cache_return_unused (void)
 		       1);
   else
     {
-      ext2_debug ("ext2fs: disk cache is starving\n");
+      printf ("ext2fs: disk cache is starving\n");
 
       /* Give it some time.  This should happen rarely.  */
       sleep (1);
@@ -999,10 +954,8 @@ disk_cache_return_unused (void)
 void *
 disk_cache_block_ref (block_t block)
 {
-  struct disk_cache_info *info;
   int index;
   void *bptr;
-  hurd_ihash_locp_t slot;
 
   assert (block < store->size >> log2_block_size);
 
@@ -1011,7 +964,7 @@ disk_cache_block_ref (block_t block)
 retry_ref:
   pthread_mutex_lock (&disk_cache_lock);
 
-  bptr = hurd_ihash_locp_find (disk_cache_bptr, block, &slot);
+  bptr = hurd_ihash_find (disk_cache_bptr, block);
   if (bptr)
     /* Already mapped.  */
     {
@@ -1047,10 +1000,34 @@ retry_ref:
     }
 
   /* Search for a block that is not in core and is not referenced.  */
-  info = disk_cache_info_free_pop ();
+  index = disk_cache_hint;
+  while ((disk_cache_info[index].flags & DC_DONT_REUSE)
+	 || (disk_cache_info[index].ref_count))
+    {
+      ext2_debug ("reject %u -> %d (ref_count = %hu, flags = %#hx)",
+		  disk_cache_info[index].block, index,
+		  disk_cache_info[index].ref_count,
+		  disk_cache_info[index].flags);
+
+      /* Just move to next block.  */
+      index++;
+      if (index >= disk_cache_blocks)
+	index -= disk_cache_blocks;
+
+      /* If we return to where we started, than there is no suitable
+	 block. */
+      if (index == disk_cache_hint)
+	break;
+    }
+
+  /* The next place in the disk cache becomes the current hint.  */
+  disk_cache_hint = index + 1;
+  if (disk_cache_hint >= disk_cache_blocks)
+    disk_cache_hint -= disk_cache_blocks;
 
   /* Is suitable place found?  */
-  if (info == NULL)
+  if ((disk_cache_info[index].flags & DC_DONT_REUSE)
+      || disk_cache_info[index].ref_count)
     /* No place is found.  Try to release some blocks and try
        again.  */
     {
@@ -1064,7 +1041,6 @@ retry_ref:
     }
 
   /* Suitable place is found.  */
-  index = info - disk_cache_info;
 
   /* Calculate pointer to data.  */
   bptr = (char *)disk_cache + (index << log2_block_size);
@@ -1111,13 +1087,12 @@ retry_ref:
 #endif
 
   /* Re-associate.  */
-
-  /* New association.  */
-  if (hurd_ihash_locp_add (disk_cache_bptr, slot, block, bptr))
-    ext2_panic ("Couldn't hurd_ihash_locp_add new disk block");
   if (disk_cache_info[index].block != DC_NO_BLOCK)
     /* Remove old association.  */
     hurd_ihash_remove (disk_cache_bptr, disk_cache_info[index].block);
+  /* New association.  */
+  if (hurd_ihash_add (disk_cache_bptr, block, bptr))
+    ext2_panic ("Couldn't hurd_ihash_add new disk block");
   assert (! (disk_cache_info[index].flags & DC_DONT_REUSE & ~DC_UNTOUCHED));
   disk_cache_info[index].block = block;
   assert (! disk_cache_info[index].ref_count);
@@ -1196,8 +1171,6 @@ disk_cache_block_deref (void *ptr)
   assert (! (disk_cache_info[index].flags & DC_UNTOUCHED));
   assert (disk_cache_info[index].ref_count >= 1);
   disk_cache_info[index].ref_count--;
-  if (disk_cache_info[index].ref_count == 0)
-    disk_cache_info_free_push (&disk_cache_info[index]);
   pthread_mutex_unlock (&disk_cache_lock);
 }
 
@@ -1223,6 +1196,8 @@ disk_cache_block_is_ref (block_t block)
 void
 create_disk_pager (void)
 {
+  pthread_t thread;
+  pthread_attr_t attr;
   error_t err;
 
   /* The disk pager.  */
@@ -1242,36 +1217,9 @@ create_disk_pager (void)
   file_pager_bucket = ports_create_bucket ();
 
   /* Start libpagers worker threads.  */
-  err = pager_start_workers (file_pager_bucket, &file_pager_requests);
+  err = pager_start_workers (file_pager_bucket);
   if (err)
     ext2_panic ("can't create libpager worker threads: %s", strerror (err));
-}
-
-error_t
-inhibit_ext2_pager (void)
-{
-  error_t err;
-
-  /* The file pager can rely on the disk pager, so inhibit the file
-     pager first.  */
-
-  err = pager_inhibit_workers (file_pager_requests);
-  if (err)
-    return err;
-
-  err = pager_inhibit_workers (diskfs_disk_pager_requests);
-  /* We don't want only one pager disabled.  */
-  if (err)
-    pager_resume_workers (file_pager_requests);
-
-  return err;
-}
-
-void
-resume_ext2_pager (void)
-{
-  pager_resume_workers (diskfs_disk_pager_requests);
-  pager_resume_workers (file_pager_requests);
 }
 
 /* Call this to create a FILE_DATA pager and return a send right.
@@ -1288,7 +1236,7 @@ diskfs_get_filemap (struct node *node, vm_prot_t prot)
   pthread_spin_lock (&node_to_page_lock);
   do
     {
-      struct pager *pager = diskfs_node_disknode (node)->pager;
+      struct pager *pager = node->dn->pager;
       if (pager)
 	{
 	  /* Because PAGER is not a real reference,
@@ -1297,9 +1245,9 @@ diskfs_get_filemap (struct node *node, vm_prot_t prot)
 	     and loop.  The deallocation will complete separately. */
 	  right = pager_get_port (pager);
 	  if (right == MACH_PORT_NULL)
-	    diskfs_node_disknode (node)->pager = 0;
-  	  else
-  	    pager_get_upi (pager)->max_prot |= prot;
+	    node->dn->pager = 0;
+	  else
+	    pager_get_upi (pager)->max_prot |= prot;
 	}
       else
 	{
@@ -1309,10 +1257,10 @@ diskfs_get_filemap (struct node *node, vm_prot_t prot)
 	  upi->node = node;
 	  upi->max_prot = prot;
 	  diskfs_nref_light (node);
-	  diskfs_node_disknode (node)->pager =
-		    pager_create (upi, file_pager_bucket, MAY_CACHE,
-				  MEMORY_OBJECT_COPY_DELAY, 0);
-	  if (diskfs_node_disknode (node)->pager == 0)
+	  node->dn->pager =
+	    pager_create (upi, file_pager_bucket, MAY_CACHE,
+			  MEMORY_OBJECT_COPY_DELAY, 0);
+	  if (node->dn->pager == 0)
 	    {
 	      diskfs_nrele_light (node);
 	      free (upi);
@@ -1320,8 +1268,8 @@ diskfs_get_filemap (struct node *node, vm_prot_t prot)
 	      return MACH_PORT_NULL;
 	    }
 
-	  right = pager_get_port (diskfs_node_disknode (node)->pager);
-	  ports_port_deref (diskfs_node_disknode (node)->pager);
+	  right = pager_get_port (node->dn->pager);
+	  ports_port_deref (node->dn->pager);
 	}
     }
   while (right == MACH_PORT_NULL);
@@ -1341,7 +1289,7 @@ drop_pager_softrefs (struct node *node)
   struct pager *pager;
 
   pthread_spin_lock (&node_to_page_lock);
-  pager = diskfs_node_disknode (node)->pager;
+  pager = node->dn->pager;
   if (pager)
     ports_port_ref (pager);
   pthread_spin_unlock (&node_to_page_lock);
@@ -1363,7 +1311,7 @@ allow_pager_softrefs (struct node *node)
   struct pager *pager;
 
   pthread_spin_lock (&node_to_page_lock);
-  pager = diskfs_node_disknode (node)->pager;
+  pager = node->dn->pager;
   if (pager)
     ports_port_ref (pager);
   pthread_spin_unlock (&node_to_page_lock);
@@ -1383,7 +1331,7 @@ diskfs_get_filemap_pager_struct (struct node *node)
 {
   /* This is safe because pager can't be cleared; there must be
      an active mapping for this to be called. */
-  return diskfs_node_disknode (node)->pager;
+  return node->dn->pager;
 }
 
 /* Shutdown all the pagers (except the disk pager). */

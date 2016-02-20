@@ -52,7 +52,7 @@
 void
 diskfs_free_node (struct node *np, mode_t old_mode)
 {
-  unsigned char *bh;
+  char *bh;
   unsigned long block_group;
   unsigned long bit;
   struct ext2_group_desc *gdp;
@@ -114,7 +114,7 @@ diskfs_free_node (struct node *np, mode_t old_mode)
 ino_t
 ext2_alloc_inode (ino_t dir_inum, mode_t mode)
 {
-  unsigned char *bh = NULL;
+  char *bh = NULL;
   int i, j, avefreei;
   ino_t inum;
   struct ext2_group_desc *gdp;
@@ -225,7 +225,7 @@ repeat:
     {
       if (set_bit (inum, bh))
 	{
-	  ext2_warning ("bit already set for inode %llu", inum);
+	  ext2_warning ("bit already set for inode %d", inum);
 	  disk_cache_block_deref (bh);
 	  bh = NULL;
 	  goto repeat;
@@ -250,7 +250,7 @@ repeat:
   if (inum < EXT2_FIRST_INO (sblock) || inum > sblock->s_inodes_count)
     {
       ext2_error ("reserved inode or inode > inodes count - "
-		  "block_group = %d,inode=%llu", i, inum);
+		  "block_group = %d,inode=%d", i, inum);
       inum = 0;
       goto sync_out;
     }
@@ -316,14 +316,14 @@ diskfs_alloc_node (struct node *dir, mode_t mode, struct node **node)
     }
   /* Zero out the block pointers in case there's some noise left on disk.  */
   for (block = 0; block < EXT2_N_BLOCKS; block++)
-    if (diskfs_node_disknode (np)->info.i_data[block] != 0)
+    if (np->dn->info.i_data[block] != 0)
       {
-	diskfs_node_disknode (np)->info.i_data[block] = 0;
+	np->dn->info.i_data[block] = 0;
 	np->dn_set_ctime = 1;
       }
-  if (diskfs_node_disknode (np)->info_i_translator != 0)
+  if (np->dn->info_i_translator != 0)
     {
-      diskfs_node_disknode (np)->info_i_translator = 0;
+      np->dn->info_i_translator = 0;
       np->dn_set_ctime = 1;
     }
   st->st_mode &= ~S_IPTRANS;
@@ -335,9 +335,8 @@ diskfs_alloc_node (struct node *dir, mode_t mode, struct node **node)
     }
 
   /* Propagate initial inode flags from the directory, as Linux does.  */
-  diskfs_node_disknode (np)->info.i_flags =
-    ext2_mask_flags(mode,
-	       diskfs_node_disknode (dir)->info.i_flags & EXT2_FL_INHERITED);
+  np->dn->info.i_flags =
+    ext2_mask_flags(mode, dir->dn->info.i_flags & EXT2_FL_INHERITED);
 
   st->st_flags = 0;
 

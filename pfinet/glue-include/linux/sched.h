@@ -78,13 +78,13 @@ prepare_current (int isroot)
 struct semaphore { };
 
 
-static inline int
+extern inline int
 suser ()
 {
   return current->isroot;
 };
 
-static inline int
+extern inline int
 capable(int cap)
 {
   return current->isroot;
@@ -185,9 +185,6 @@ schedule_timeout (long timeout)
       else
 	return 0;
     }
-  /* It may happen that we get woken without a signal. Noticed notably during
-     rsyslog testsuite.  Make sure we don't leave our timer in.  */
-  del_timer(&timer);
   return 0;
 }
 
@@ -198,7 +195,7 @@ schedule_timeout (long timeout)
    Hurd, servers are not responsible for SIGPIPE; the library
    does that itself upon receiving EPIPE.  So we can just
    NOP such calls.  */
-static inline int
+extern inline int
 send_sig (u_long signo, struct task_struct *task, int priv)
 {
   assert (signo == SIGPIPE);

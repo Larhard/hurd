@@ -284,7 +284,9 @@ do_mount (struct fs *fs, int remount)
       {
 	ARGZ (add (&fsopts, &fsopts_len, o));
       }
-    else if ((strcmp (o, "defaults") != 0) && (strlen (o) != 0))
+    else if ((strcmp (o, "defaults") != 0) && (strlen (o) != 0) &&
+	     strcmp (o, "loop") != 0 &&
+	     strcmp (o, "exec") != 0)
       {
 	/* Prepend `--' to the option to make a long option switch,
 	   e.g. `--ro' or `--rsize=1024'.  */

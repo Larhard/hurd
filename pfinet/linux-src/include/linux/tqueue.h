@@ -80,7 +80,7 @@ extern spinlock_t tqueue_lock;
 /*
  * queue_task
  */
-static __inline__ void queue_task(struct tq_struct *bh_pointer,
+extern __inline__ void queue_task(struct tq_struct *bh_pointer,
 			   task_queue *bh_list)
 {
 	if (!test_and_set_bit(0,&bh_pointer->sync)) {
@@ -95,7 +95,7 @@ static __inline__ void queue_task(struct tq_struct *bh_pointer,
 /*
  * Call all "bottom halfs" on a given list.
  */
-static __inline__ void run_task_queue(task_queue *list)
+extern __inline__ void run_task_queue(task_queue *list)
 {
 	if (*list) {
 		unsigned long flags;

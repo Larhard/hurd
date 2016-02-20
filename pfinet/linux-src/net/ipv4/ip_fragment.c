@@ -79,19 +79,19 @@ struct ipq *ipq_hash[IPQ_HASHSZ];
 atomic_t ip_frag_mem = ATOMIC_INIT(0);		/* Memory used for fragments */
 
 /* Memory Tracking Functions. */
-static __inline__ void frag_kfree_skb(struct sk_buff *skb)
+extern __inline__ void frag_kfree_skb(struct sk_buff *skb)
 {
 	atomic_sub(skb->truesize, &ip_frag_mem);
 	kfree_skb(skb);
 }
 
-static __inline__ void frag_kfree_s(void *ptr, int len)
+extern __inline__ void frag_kfree_s(void *ptr, int len)
 {
 	atomic_sub(len, &ip_frag_mem);
 	kfree(ptr);
 }
  
-static __inline__ void *frag_kmalloc(int size, int pri)
+extern __inline__ void *frag_kmalloc(int size, int pri)
 {
 	void *vp = kmalloc(size, pri);
 

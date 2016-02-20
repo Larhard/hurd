@@ -100,7 +100,7 @@ mkdev() {
 	;;
 
       std)
-	mkdev console tty urandom null zero full fd time mem klog shm
+	mkdev console tty urandom null zero full fd time mem klog
 	;;
       console|com[0-9])
 	st $I root 600 /hurd/term ${DEVDIR}/$I device $I;;
@@ -222,6 +222,9 @@ mkdev() {
 	# The `losetup' script changes the translator to "activate" the device.
         st $I root 640 /hurd/null
 	;;
+
+      apm)
+        ;;
 
       *)
 	lose "$I: Unknown device name"

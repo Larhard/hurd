@@ -26,7 +26,7 @@ SRCS = connq.c io.c pflocal.c socket.c pf.c sock.c sserver.c
 MIGSTUBS = ioServer.o socketServer.o
 OBJS = $(SRCS:.c=.o) $(MIGSTUBS)
 HURDLIBS = pipe trivfs iohelp fshelp ports ihash shouldbeinlibc
-LDLIBS = -lpthread
+OTHERLIBS = -lpthread
 
 MIGSFLAGS = -imacros $(srcdir)/mig-mutate.h
 

@@ -379,8 +379,6 @@ S_io_reauthenticate (struct sock_user *user,
   auth = getauth ();
   newright = ports_get_send_right (newuser);
   assert (newright != MACH_PORT_NULL);
-  /* Release the global lock while blocking on the auth server and client.  */
-  pthread_mutex_unlock (&global_lock);
   do
     err = auth_server_authenticate (auth,
 				    rend,
@@ -392,7 +390,6 @@ S_io_reauthenticate (struct sock_user *user,
 				    &gen_gids, &gengidlen,
 				    &aux_gids, &auxgidlen);
   while (err == EINTR);
-  pthread_mutex_lock (&global_lock);
   mach_port_deallocate (mach_task_self (), rend);
   mach_port_deallocate (mach_task_self (), newright);
   mach_port_deallocate (mach_task_self (), auth);

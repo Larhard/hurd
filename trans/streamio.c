@@ -36,7 +36,6 @@
 
 #include "libtrivfs/trivfs_fs_S.h"
 #include "libtrivfs/trivfs_io_S.h"
-#include "device_reply_S.h"
 
 /* The global lock */
 pthread_mutex_t global_lock;
@@ -274,16 +273,10 @@ static const struct argp argp = { options, parse_opt, args_doc, doc };
 int
 demuxer (mach_msg_header_t *inp, mach_msg_header_t *outp)
 {
-  mig_routine_t routine;
-  if ((routine = NULL, trivfs_demuxer (inp, outp)) ||
-      (routine = device_reply_server_routine (inp)))
-    {
-      if (routine)
-        (*routine) (inp, outp);
-      return TRUE;
-    }
-  else
-    return FALSE;
+  extern int device_reply_server (mach_msg_header_t *, mach_msg_header_t *);
+
+  return (trivfs_demuxer (inp, outp)
+	  || device_reply_server (inp, outp));
 }
 
 int
@@ -808,7 +801,7 @@ dev_open (const char *name, dev_mode_t mode)
 			      phys_reply_writes, MACH_MSG_TYPE_MAKE_SEND);
     }
 
-  err = device_open_request (device_master, phys_reply, mode, (char *) name);
+  err = device_open_request (device_master, phys_reply, mode, name);
   if (err)
     {
       mach_port_deallocate (mach_task_self (), phys_reply);

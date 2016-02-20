@@ -29,18 +29,8 @@
 unsigned int num_files;
 static unsigned int gen;
 
-/* all_nodes is a list of all nodes.
-
-   Access to all_nodes and all_nodes_nr_items is protected by
-   all_nodes_lock.
-
-   Every node in all_nodes carries a light reference.  When we are
-   asked to give up that light reference, we reacquire our lock
-   momentarily to check whether someone else reacquired a
-   reference.  */
 struct node *all_nodes;
 static size_t all_nodes_nr_items;
-pthread_rwlock_t all_nodes_lock = PTHREAD_RWLOCK_INITIALIZER;
 
 error_t
 diskfs_alloc_node (struct node *dp, mode_t mode, struct node **npp)
@@ -50,17 +40,18 @@ diskfs_alloc_node (struct node *dp, mode_t mode, struct node **npp)
   dn = calloc (1, sizeof *dn);
   if (dn == 0)
     return ENOSPC;
-
-  if (round_page (get_used () + sizeof *dn) / vm_page_size
+  pthread_spin_lock (&diskfs_node_refcnt_lock);
+  if (round_page (tmpfs_space_used + sizeof *dn) / vm_page_size
       > tmpfs_page_limit)
     {
-      pthread_rwlock_unlock (&all_nodes_lock);
+      pthread_spin_unlock (&diskfs_node_refcnt_lock);
       free (dn);
       return ENOSPC;
     }
   dn->gen = gen++;
-  __atomic_add_fetch (&num_files, 1, __ATOMIC_RELAXED);
-  adjust_used (sizeof *dn);
+  ++num_files;
+  tmpfs_space_used += sizeof *dn;
+  pthread_spin_unlock (&diskfs_node_refcnt_lock);
 
   dn->type = IFTODT (mode & S_IFMT);
   return diskfs_cached_lookup ((ino_t) (uintptr_t) dn, npp);
@@ -84,19 +75,15 @@ diskfs_free_node (struct node *np, mode_t mode)
       free (np->dn->u.lnk);
       break;
     }
-
-  pthread_rwlock_wrlock (&all_nodes_lock);
   *np->dn->hprevp = np->dn->hnext;
   if (np->dn->hnext != 0)
     np->dn->hnext->dn->hprevp = np->dn->hprevp;
   all_nodes_nr_items -= 1;
-  pthread_rwlock_unlock (&all_nodes_lock);
-
   free (np->dn);
   np->dn = 0;
 
-  __atomic_sub_fetch (&num_files, 1, __ATOMIC_RELAXED);
-  adjust_used (-sizeof *np->dn);
+  --num_files;
+  tmpfs_space_used -= sizeof *np->dn;
 }
 
 void
@@ -130,6 +117,14 @@ diskfs_node_norefs (struct node *np)
 	  np->dn->u.chr = np->dn_stat.st_rdev;
 	  break;
 	}
+
+      /* Remove this node from the cache list rooted at `all_nodes'.  */
+      *np->dn->hprevp = np->dn->hnext;
+      if (np->dn->hnext != 0)
+	np->dn->hnext->dn->hprevp = np->dn->hprevp;
+      all_nodes_nr_items -= 1;
+      np->dn->hnext = 0;
+      np->dn->hprevp = 0;
     }
 
   free (np);
@@ -172,34 +167,30 @@ diskfs_cached_lookup (ino_t inum, struct node **npp)
 
   assert (npp);
 
-  pthread_rwlock_rdlock (&all_nodes_lock);
   if (dn->hprevp != 0)		/* There is already a node.  */
-    goto gotit;
+    {
+      np = *dn->hprevp;
+      assert (np->dn == dn);
+      assert (*dn->hprevp == np);
+
+      diskfs_nref (np);
+    }
   else
     /* Create the new node.  */
     {
       struct stat *st;
-      pthread_rwlock_unlock (&all_nodes_lock);
 
       np = diskfs_make_node (dn);
       np->cache_id = (ino_t) (uintptr_t) dn;
 
-      pthread_rwlock_wrlock (&all_nodes_lock);
-      if (dn->hprevp != NULL)
-        {
-          /* We lost a race.  */
-          diskfs_nrele (np);
-          goto gotit;
-        }
-
+      pthread_spin_lock (&diskfs_node_refcnt_lock);
       dn->hnext = all_nodes;
       if (dn->hnext)
 	dn->hnext->dn->hprevp = &dn->hnext;
       dn->hprevp = &all_nodes;
       all_nodes = np;
       all_nodes_nr_items += 1;
-      diskfs_nref_light (np);
-      pthread_rwlock_unlock (&all_nodes_lock);
+      pthread_spin_unlock (&diskfs_node_refcnt_lock);
 
       st = &np->dn_stat;
       memset (st, 0, sizeof *st);
@@ -229,16 +220,6 @@ diskfs_cached_lookup (ino_t inum, struct node **npp)
   pthread_mutex_lock (&np->lock);
   *npp = np;
   return 0;
-
- gotit:
-  np = *dn->hprevp;
-  assert (np->dn == dn);
-  assert (*dn->hprevp == np);
-  diskfs_nref (np);
-  pthread_rwlock_unlock (&all_nodes_lock);
-  pthread_mutex_lock (&np->lock);
-  *npp = np;
-  return 0;
 }
 
 error_t
@@ -248,12 +229,12 @@ diskfs_node_iterate (error_t (*fun) (struct node *))
   size_t num_nodes;
   struct node *node, **node_list, **p;
 
-  pthread_rwlock_rdlock (&all_nodes_lock);
+  pthread_spin_lock (&diskfs_node_refcnt_lock);
 
   /* We must copy everything from the hash table into another data structure
      to avoid running into any problems with the hash-table being modified
      during processing (normally we delegate access to hash-table with
-     all_nodes_lock, but we can't hold this while locking the
+     diskfs_node_refcnt_lock, but we can't hold this while locking the
      individual node locks).  */
 
   num_nodes = all_nodes_nr_items;
@@ -262,14 +243,10 @@ diskfs_node_iterate (error_t (*fun) (struct node *))
   for (node = all_nodes; node != 0; node = node->dn->hnext)
     {
       *p++ = node;
-
-      /* We acquire a hard reference for node, but without using
-	 diskfs_nref.  We do this so that diskfs_new_hardrefs will not
-	 get called.  */
-      refcounts_ref (&node->refcounts, NULL);
+      node->references++;
     }
 
-  pthread_rwlock_unlock (&all_nodes_lock);
+  pthread_spin_unlock (&diskfs_node_refcnt_lock);
 
   p = node_list;
   while (num_nodes-- > 0)
@@ -295,27 +272,6 @@ diskfs_node_iterate (error_t (*fun) (struct node *))
 void
 diskfs_try_dropping_softrefs (struct node *np)
 {
-  pthread_rwlock_wrlock (&all_nodes_lock);
-  if (np->cache_id != 0)
-    {
-      /* Check if someone reacquired a reference.  */
-      struct references result;
-      refcounts_references (&np->refcounts, &result);
-
-      if (result.hard > 0)
-	{
-	  /* A reference was reacquired.  It's fine, we didn't touch
-	     anything yet. */
-	  pthread_rwlock_unlock (&all_nodes_lock);
-	  return;
-	}
-
-      /* Just let go of the weak reference.  The node will be removed
-	 from all_nodes in diskfs_free_node.  */
-      np->cache_id = 0;
-      diskfs_nrele_light (np);
-    }
-  pthread_rwlock_unlock (&all_nodes_lock);
 }
 
 /* The user must define this funcction.  Node NP has some light
@@ -491,7 +447,7 @@ diskfs_grow (struct node *np, off_t size, struct protid *cred)
 
   off_t set_size = size;
   size = round_page (size);
-  if (round_page (get_used () + size - np->allocsize)
+  if (round_page (tmpfs_space_used + size - np->allocsize)
       / vm_page_size > tmpfs_page_limit)
     return ENOSPC;
 

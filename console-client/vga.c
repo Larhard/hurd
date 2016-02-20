@@ -713,7 +713,7 @@ vga_display_write (void *handle, conchar_t *str, size_t length,
 	return 0;
 
       if (!disp->cur_conchar_attr_init
-	  || !conchar_attr_equal (&disp->cur_conchar_attr, &str->attr))
+	  || *(uint32_t *) &disp->cur_conchar_attr != *(uint32_t *) &str->attr)
 	{
 	  if (!disp->cur_conchar_attr_init)
 	    disp->cur_conchar_attr_init = 1;

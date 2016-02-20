@@ -49,7 +49,7 @@ netfs_S_dir_lookup (struct protid *diruser,
   char *nextname;
   char *relpath;
   error_t error;
-  struct protid *newpi = NULL;
+  struct protid *newpi;
   struct iouser *user;
 
   if (!diruser)
@@ -128,9 +128,7 @@ netfs_S_dir_lookup (struct protid *diruser,
 	    *do_retry = FS_RETRY_REAUTH;
 	    *retry_port = diruser->po->shadow_root_parent;
 	    *retry_port_type = MACH_MSG_TYPE_COPY_SEND;
-	    if (lastcomp && mustbedir) /* Trailing slash.  */
-	      strcpy (retry_name, "/");
-	    else if (!lastcomp)
+	    if (! lastcomp)
 	      strcpy (retry_name, nextname);
 	    error = 0;
 	    pthread_mutex_unlock (&dnp->lock);
@@ -144,9 +142,7 @@ netfs_S_dir_lookup (struct protid *diruser,
 	    *do_retry = FS_RETRY_REAUTH;
 	    *retry_port = diruser->po->root_parent;
 	    *retry_port_type = MACH_MSG_TYPE_COPY_SEND;
-	    if (lastcomp && mustbedir) /* Trailing slash.  */
-	      strcpy (retry_name, "/");
-	    else if (!lastcomp)
+	    if (!lastcomp)
 	      strcpy (retry_name, nextname);
 	    error = 0;
 	    pthread_mutex_unlock (&dnp->lock);
@@ -198,7 +194,7 @@ netfs_S_dir_lookup (struct protid *diruser,
       if (error)
 	goto out;
 
-      if ((((flags & O_NOTRANS) == 0) || !lastcomp || mustbedir)
+      if ((((flags & O_NOTRANS) == 0) || !lastcomp)
 	  && ((np->nn_translated & S_IPTRANS)
 	      || S_ISFIFO (np->nn_translated)
 	      || S_ISCHR (np->nn_translated)
@@ -292,16 +288,10 @@ netfs_S_dir_lookup (struct protid *diruser,
 	  if (error != ENOENT)
 	    {
 	      *retry_port_type = MACH_MSG_TYPE_MOVE_SEND;
-	      if (!error)
+	      if (!lastcomp && !error)
 		{
-		  char *end = strchr (retry_name, '\0');
-		  if (mustbedir)
-		    *end++ = '/'; /* Trailing slash.  */
-		  else if (!lastcomp) {
-		    if (end != retry_name)
-		      *end++ = '/';
-		    strcpy (end, nextname);
-		  }
+		  strcat (retry_name, "/");
+		  strcat (retry_name, nextname);
 		}
 
 	      if (register_translator)

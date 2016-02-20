@@ -28,10 +28,11 @@ MIGSFLAGS = -imacros $(srcdir)/mig-mutate.h
 
 MIGSTUBS = processServer.o notifyServer.o \
 	ourmsgUser.o proc_excUser.o proc_excServer.o \
-	task_notifyServer.o
+	task_notifyServer.o task_notifyUser.o
 OBJS = $(SRCS:.c=.o) $(MIGSTUBS)
 HURDLIBS = ihash ports shouldbeinlibc
-LDLIBS = -lpthread
+
+OTHERLIBS = -lpthread
 
 include ../Makeconf
 

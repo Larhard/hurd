@@ -56,9 +56,11 @@ int trivfs_support_write = 1;
 int trivfs_support_exec = 0;
 int trivfs_allow_open = O_READ | O_WRITE;
 
-/* We have a class each per portclass.  */
-struct port_class *pfinet_protid_portclasses[2];
-struct port_class *pfinet_cntl_portclasses[2];
+struct port_class *trivfs_protid_portclasses[2];
+int trivfs_protid_nportclasses = 2;
+
+struct port_class *trivfs_cntl_portclasses[2];
+int trivfs_cntl_nportclasses = 2;
 
 /* Which portclass to install on the bootstrap port, default to IPv4. */
 int pfinet_bootstrap_portclass = PORTCLASS_INET;
@@ -269,8 +271,6 @@ extern void sk_init (void), skb_init (void);
 extern int net_dev_init (void);
 extern void inet6_proto_init (struct net_proto *pro);
 
-#define ARRAY_SIZE(x)       (sizeof(x) / sizeof((x)[0]))
-
 int
 main (int argc,
       char **argv)
@@ -334,7 +334,7 @@ main (int argc,
 
   if (bootstrap != MACH_PORT_NULL) {
     /* Create portclass to install on the bootstrap port. */
-    if(pfinet_protid_portclasses[pfinet_bootstrap_portclass]
+    if(trivfs_protid_portclasses[pfinet_bootstrap_portclass]
        != MACH_PORT_NULL)
       error(1, 0, "No portclass left to assign to bootstrap port");
 
@@ -342,23 +342,17 @@ main (int argc,
     if (pfinet_bootstrap_portclass == PORTCLASS_INET6)
       pfinet_activate_ipv6 ();
 #endif
-
-    err = trivfs_add_protid_port_class (
-	&pfinet_protid_portclasses[pfinet_bootstrap_portclass]);
-    if (err)
-      error (1, 0, "error creating control port class");
-
-    err = trivfs_add_control_port_class (
-	&pfinet_cntl_portclasses[pfinet_bootstrap_portclass]);
-    if (err)
-      error (1, 0, "error creating control port class");
+    
+    trivfs_protid_portclasses[pfinet_bootstrap_portclass] =
+      ports_create_class (trivfs_clean_protid, 0);
+    trivfs_cntl_portclasses[pfinet_bootstrap_portclass] =
+      ports_create_class (trivfs_clean_cntl, 0);
 
     /* Talk to parent and link us in.  */
     err = trivfs_startup (bootstrap, 0,
-			  pfinet_cntl_portclasses[pfinet_bootstrap_portclass],
-			  pfinet_bucket,
-                          pfinet_protid_portclasses[pfinet_bootstrap_portclass],
-                          pfinet_bucket,
+			  trivfs_cntl_portclasses[pfinet_bootstrap_portclass],
+			  pfinet_bucket, trivfs_protid_portclasses
+			  [pfinet_bootstrap_portclass], pfinet_bucket, 
 			  &pfinetctl);
 
     if (err)
@@ -376,11 +370,11 @@ main (int argc,
     int i;
     /* Check that at least one portclass has been bound, 
        error out otherwise. */
-    for (i = 0; i < ARRAY_SIZE (pfinet_protid_portclasses); i++)
-      if (pfinet_protid_portclasses[i] != MACH_PORT_NULL)
+    for (i = 0; i < trivfs_protid_nportclasses; i ++)
+      if (trivfs_protid_portclasses[i] != MACH_PORT_NULL)
 	break;
 
-    if (i == ARRAY_SIZE (pfinet_protid_portclasses))
+    if (i == trivfs_protid_nportclasses)
       error (1, 0, "should be started as a translator.\n");
   }
 
@@ -430,25 +424,22 @@ pfinet_bind (int portclass, const char *name)
     err = errno;
 
   if (! err) {
-    if (pfinet_protid_portclasses[portclass] != MACH_PORT_NULL)
+    if (trivfs_protid_portclasses[portclass] != MACH_PORT_NULL)
       error (1, 0, "Cannot bind one protocol to multiple nodes.\n");
 
 #ifdef CONFIG_IPV6
     if (portclass == PORTCLASS_INET6)
       pfinet_activate_ipv6 ();
 #endif
-    //mark
-    err = trivfs_add_protid_port_class (&pfinet_protid_portclasses[portclass]);
-    if (err)
-      error (1, 0, "error creating control port class");
 
-    err = trivfs_add_control_port_class (&pfinet_cntl_portclasses[portclass]);
-    if (err)
-      error (1, 0, "error creating control port class");
+    trivfs_protid_portclasses[portclass] =
+      ports_create_class (trivfs_clean_protid, 0);
+    trivfs_cntl_portclasses[portclass] =
+      ports_create_class (trivfs_clean_cntl, 0);
 
-    err = trivfs_create_control (file, pfinet_cntl_portclasses[portclass],
-				 pfinet_bucket,
-				 pfinet_protid_portclasses[portclass],
+    err = trivfs_create_control (file, trivfs_cntl_portclasses[portclass],
+				 pfinet_bucket, 
+				 trivfs_protid_portclasses[portclass], 
 				 pfinet_bucket, &cntl);
   }
 
@@ -482,16 +473,16 @@ trivfs_goaway (struct trivfs_control *cntl, int flags)
   else
     {
       /* Stop new requests.  */
-      ports_inhibit_class_rpcs (pfinet_cntl_portclasses[0]);
-      ports_inhibit_class_rpcs (pfinet_protid_portclasses[0]);
+      ports_inhibit_class_rpcs (trivfs_cntl_portclasses[0]);
+      ports_inhibit_class_rpcs (trivfs_protid_portclasses[0]);
       ports_inhibit_class_rpcs (socketport_class);
 
       if (ports_count_class (socketport_class) != 0)
 	{
 	  /* We won't go away, so start things going again...  */
 	  ports_enable_class (socketport_class);
-	  ports_resume_class_rpcs (pfinet_cntl_portclasses[0]);
-	  ports_resume_class_rpcs (pfinet_protid_portclasses[0]);
+	  ports_resume_class_rpcs (trivfs_cntl_portclasses[0]);
+	  ports_resume_class_rpcs (trivfs_protid_portclasses[0]);
 
 	  return EBUSY;
 	}

@@ -26,7 +26,7 @@ struct notifier_block
 #define NOTIFY_STOP_MASK	0x8000		/* Don't call further */
 #define NOTIFY_BAD		(NOTIFY_STOP_MASK|0x0002)	/* Bad/Veto action	*/
 
-static __inline__ int notifier_chain_register(struct notifier_block **list, struct notifier_block *n)
+extern __inline__ int notifier_chain_register(struct notifier_block **list, struct notifier_block *n)
 {
 	while(*list)
 	{
@@ -44,7 +44,7 @@ static __inline__ int notifier_chain_register(struct notifier_block **list, stru
  *	GPL'd
  */
  
-static __inline__ int notifier_chain_unregister(struct notifier_block **nl, struct notifier_block *n)
+extern __inline__ int notifier_chain_unregister(struct notifier_block **nl, struct notifier_block *n)
 {
 	while((*nl)!=NULL)
 	{
@@ -62,7 +62,7 @@ static __inline__ int notifier_chain_unregister(struct notifier_block **nl, stru
  *	This is one of these things that is generally shorter inline
  */
  
-static __inline__ int notifier_call_chain(struct notifier_block **n, unsigned long val, void *v)
+extern __inline__ int notifier_call_chain(struct notifier_block **n, unsigned long val, void *v)
 {
 	int ret=NOTIFY_DONE;
 	struct notifier_block *nb = *n;

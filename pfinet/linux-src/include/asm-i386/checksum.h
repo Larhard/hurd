@@ -34,14 +34,14 @@ asmlinkage unsigned int csum_partial_copy_generic( const char *src, char *dst, i
  *	If you use these functions directly please don't forget the 
  *	verify_area().
  */
-static __inline__
+extern __inline__
 unsigned int csum_partial_copy_nocheck ( const char *src, char *dst,
 					int len, int sum)
 {
 	return csum_partial_copy_generic ( src, dst, len, sum, NULL, NULL);
 }
 
-static __inline__
+extern __inline__
 unsigned int csum_partial_copy_from_user ( const char *src, char *dst,
 						int len, int sum, int *err_ptr)
 {
@@ -58,7 +58,7 @@ unsigned int csum_partial_copy_from_user ( const char *src, char *dst,
  * This combination is currently not used, but possible:
  */
 
-static __inline__
+extern __inline__
 unsigned int csum_partial_copy_to_user ( const char *src, char *dst,
 					int len, int sum, int *err_ptr)
 {

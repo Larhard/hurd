@@ -52,9 +52,8 @@ driver-CPPFLAGS = -D'CONSOLE_DEFPATH="$(module-dir)\0"' \
 driver-DEPS = $(..)config.make
 
 console: $(CONSOLE_SRCS:.c=.o) \
-	../libcons/libcons.a ../libfshelp/libfshelp.a \
-	../libnetfs/libnetfs.a ../libiohelp/libiohelp.a \
-	../libihash/libihash.a ../libports/libports.a \
+	../libnetfs/libnetfs.a ../libfshelp/libfshelp.a \
+	../libcons/libcons.a ../libports/libports.a \
 	../libshouldbeinlibc/libshouldbeinlibc.a
 
 modules = vga pc_kbd generic_speaker pc_mouse current_vcs

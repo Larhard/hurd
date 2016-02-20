@@ -19,8 +19,6 @@
    You should have received a copy of the GNU General Public License
    along with the GNU Hurd.  If not, see <http://www.gnu.org/licenses/>.  */
 
-#include <stdbool.h>
-
 /* A FIFO queue with constant-time enqueue and dequeue operations.  */
 struct item {
   struct item *next;
@@ -60,10 +58,4 @@ queue_dequeue (struct queue *q)
 
   r->next = NULL;
   return r;
-}
-
-static inline bool
-queue_empty (struct queue *q)
-{
-  return q->head == NULL;
 }

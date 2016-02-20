@@ -42,7 +42,7 @@
 
 #define printk printf
 
-static inline int
+extern inline int
 getname (const char *name, char **newp)
 {
   *newp = malloc (strlen (name) + 1);
@@ -50,7 +50,7 @@ getname (const char *name, char **newp)
   return 0;
 }
 
-static inline void
+extern inline void
 putname (char *p)
 {
   free (p);
@@ -60,14 +60,14 @@ putname (char *p)
    find any SIGIO code at all.  So we'll just punt on that; clearly
    Linux is missing the point.  SIGURG should only be sent for
    sockets that have explicitly requested it. */
-static inline int
+extern inline int
 kill_proc (int pid, int signo, int priv)
 {
   assert (signo == SIGURG);
   return 0;
 }
 
-static inline int
+extern inline int
 kill_pg (int pgrp, int signo, int priv)
 {
   assert (signo == SIGURG);

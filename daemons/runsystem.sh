@@ -11,7 +11,7 @@
 ### Where to find programs, etc.
 ###
 
-PATH=/bin:/sbin
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export PATH
 
 umask 022
@@ -118,6 +118,9 @@ esac
 /hurd/mach-defpager
 
 # This is necessary to make stat / return the correct device ids.
+# Work around a race condition (probably in the root translator).
+for i in `seq 1 100000` ; do : ; done # XXX
+
 fsysopts / --update --readonly
 
 # Finally, start the actual init.

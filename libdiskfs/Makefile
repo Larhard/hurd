@@ -41,7 +41,7 @@ OTHERSRCS = conch-fetch.c conch-set.c dir-clear.c dir-init.c dir-renamed.c \
 	extern-inline.c \
 	node-create.c node-drop.c node-make.c node-rdwr.c node-update.c \
 	node-nref.c node-nput.c node-nrele.c node-nrefl.c node-nputl.c \
-	node-nrelel.c node-cache.c \
+	node-nrelel.c \
 	peropen-make.c peropen-rele.c protid-make.c protid-rele.c \
 	init-init.c init-startup.c init-first.c init-main.c \
 	rdwr-internal.c boot-start.c demuxer.c node-times.c shutdown.c \
@@ -56,16 +56,17 @@ OTHERSRCS = conch-fetch.c conch-set.c dir-clear.c dir-init.c dir-renamed.c \
 SRCS = $(OTHERSRCS) $(FSSRCS) $(IOSRCS) $(FSYSSRCS) $(IFSOCKSRCS)
 installhdrs = diskfs.h diskfs-pager.h
 
-MIGSTUBS = fsServer.o ioServer.o fsysServer.o exec_startupServer.o \
+MIGSTUBS = fsServer.o fs_experimentalServer.o ioServer.o fsysServer.o exec_startupServer.o \
 	fsys_replyUser.o fs_notifyUser.o ifsockServer.o \
 	startup_notifyServer.o
 OBJS = $(sort $(SRCS:.c=.o) $(MIGSTUBS))
 
-HURDLIBS = fshelp iohelp store ports shouldbeinlibc pager ihash
+HURDLIBS = fshelp iohelp store ports shouldbeinlibc pager
 LDLIBS += -lpthread
 
 fsys-MIGSFLAGS = -imacros $(srcdir)/fsmutations.h -DREPLY_PORTS
 fs-MIGSFLAGS = -imacros $(srcdir)/fsmutations.h
+fs_experimental-MIGSFLAGS = -imacros $(srcdir)/fsmutations.h
 io-MIGSFLAGS = -imacros $(srcdir)/fsmutations.h
 ifsock-MIGSFLAGS = -imacros $(srcdir)/fsmutations.h
 exec_startup-MIGSFLAGS = -imacros $(srcdir)/fsmutations.h

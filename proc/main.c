@@ -158,11 +158,13 @@ main (int argc, char **argv, char **envp)
   if (err)
     error (0, err, "Increasing priority failed");
 
+#if 0
   err = register_new_task_notification (_hurd_host_priv,
 					generic_port,
 					MACH_MSG_TYPE_MAKE_SEND);
   if (err)
     error (0, err, "Registering task notifications failed");
+#endif
 
   {
     /* Get our stderr set up to print on the console, in case we have

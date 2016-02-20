@@ -40,10 +40,11 @@ FSYSSRCS=fsys-getroot.c fsys-goaway.c fsys-stubs.c fsys-syncfs.c \
 OTHERSRCS=demuxer.c protid-clean.c protid-dup.c cntl-create.c \
 	cntl-clean.c times.c startup.c open.c \
 	runtime-argp.c set-options.c append-args.c dyn-classes.c \
+	protid-classes.c cntl-classes.c
 
 SRCS=$(FSSRCS) $(IOSRCS) $(FSYSSRCS) $(OTHERSRCS)
 
-MIGSTUBS=fsServer.o ioServer.o fsysServer.o fsys_replyUser.o
+MIGSTUBS=fsServer.o fs_experimentalServer.o ioServer.o fsysServer.o fsys_replyUser.o
 
 libname = libtrivfs
 HURDLIBS = fshelp iohelp ports shouldbeinlibc
@@ -52,6 +53,9 @@ MIGSFLAGS=-imacros $(srcdir)/mig-mutate.h
 MIGCOMSFLAGS = -prefix trivfs_
 installhdrs := trivfs.h
 mig-sheader-prefix = trivfs_
+ifndef no_deps
+installhdrs += $(patsubst %,trivfs_%_S.h,fs fs_experimental io fsys)
+endif
 
 include ../Makeconf
 

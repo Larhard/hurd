@@ -1,21 +1,3 @@
-Version 0.7 (2015-10-31)
-
-The node cache in ext2fs has been improved, generalized, and moved to
-libdiskfs.  It is now also used by isofs and fatfs.
-
-The native fakeroot tool has been greatly improved.  It now handles
-named sockets, and multiple corner cases related to permissions were
-identified and fixed.
-
-A new utility `rpcscan' has been introduced.  It scans Mach servers
-and displays the RPCs handled by the associated demuxer.
-
-A long-standing synchronization issue involving the filesystem
-translators, libdiskfs, and libpager has been identified and fixed.
-
-The code has been updated to work with newer versions of the compiler
-and libc, and numerous bugs have been fixed throughout the code.
-
 Version 0.6 (2015-04-10)
 
 Numerous cleanups and stylistic fixes of the code base.  Several
@@ -23,8 +5,6 @@ problems have been identified using static analysis and exercising
 tools, and have subsequently been fixed.
 
 The message dispatching code in the Hurd servers has been improved.
-Among other things, we now make use of the protected payloads
-introduced in GNU Mach 1.5.
 
 The embedded gz and bz2 decompressor code has been removed, libz and
 libbz2 is used instead.
@@ -39,7 +19,7 @@ The init server has been split into the startup server (handling early
 system bootstrap and shutdown), and a SysV-style init program (aptly
 named `init').
 
-The procfs and random translators have been merged into this repository.
+The procfs and random translators have been merged.
 
 Version 0.5 (2013-09-27)
 

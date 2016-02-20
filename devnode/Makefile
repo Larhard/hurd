@@ -20,7 +20,7 @@ makemode := server
 
 SRCS = devnode.c
 LCLHDRS = util.h
-HURDLIBS = fshelp ihash iohelp ports shouldbeinlibc trivfs
+HURDLIBS = ports trivfs fshelp shouldbeinlibc
 target = devnode
 MIGSTUBS = deviceServer.o notifyServer.o
 MIGSFLAGS = -imacros $(srcdir)/mig-mutate.h

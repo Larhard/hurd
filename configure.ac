@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 AC_PREREQ(2.54)			dnl Minimum Autoconf version required.
-AC_INIT([GNU Hurd], [0.7], [bug-hurd@gnu.org])
+AC_INIT([GNU Hurd], [0.6], [bug-hurd@gnu.org])
 AC_CONFIG_SRCDIR([hurd/hurd_types.h])	dnl File to look for in srcdir.
 
 AC_PREFIX_DEFAULT()		dnl Default to empty prefix, not /usr/local.
@@ -162,6 +162,8 @@ else
   VERSIONING=no
 fi
 AC_SUBST(VERSIONING)
+# Check if libc contains these functions.
+AC_CHECK_FUNCS(file_exec_file_name exec_exec_file_name _hurd_exec_file_name)
 
 
 # From glibc HEAD, 2007-11-07.
@@ -245,6 +247,12 @@ AC_SUBST(boot_store_types)dnl
 AC_MSG_CHECKING(boot store types)
 AC_MSG_RESULT($boot_store_types)
 
+AC_CHECK_LIB(pciaccess, pci_system_init, LIBPCIACCESS=-lpciaccess, LIBPCIACCESS=no)
+AC_SUBST(LIBPCIACCESS)
+if test "$LIBPCIACCESS" = "no"; then
+  AC_MSG_ERROR([libpciaccess must be install in order to use libddekit])
+fi
+
 # Check for ncursesw, which is needed for the console-curses client.
 hurd_LIB_NCURSESW
 
@@ -292,14 +300,6 @@ PKG_CHECK_MODULES([X11], [x11 xproto],
        have_x11=no])
   ], [have_x11=no])
 ])
-
-AS_IF([test "$have_x11" = "yes"],
-  [AC_MSG_CHECKING([whether AWK is usable])
-   AS_IF([test "$AWK" != ":" && $AWK 'BEGIN { strtonum("1"); }' 2>/dev/null],
-     [AC_MSG_RESULT([yes])],
-     [AC_MSG_RESULT([no])
-      AC_MSG_ERROR([$AWK does not provide required strtonum function])])])
-
 AC_SUBST([have_x11])
 AC_SUBST([XKB_BASE])
 AC_DEFINE_UNQUOTED([X11_PREFIX], "$X11_PREFIX")

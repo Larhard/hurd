@@ -27,7 +27,7 @@ _ports_complete_deallocate (struct port_info *pi)
 {
   assert ((pi->flags & PORT_HAS_SENDRIGHTS) == 0);
 
-  if (MACH_PORT_VALID (pi->port_right))
+  if (pi->port_right)
     {
       struct references result;
 
@@ -37,9 +37,7 @@ _ports_complete_deallocate (struct port_info *pi)
         {
           /* A reference was reacquired through a hash table lookup.
              It's fine, we didn't touch anything yet. */
-          /* XXX: This really shouldn't happen.  */
-          assert (! "reacquired reference w/o send rights");
-          pthread_rwlock_unlock (&_ports_htable_lock);
+          pthread_mutex_unlock (&_ports_htable_lock);
           return;
         }
 

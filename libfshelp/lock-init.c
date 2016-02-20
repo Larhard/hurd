@@ -19,9 +19,7 @@
 
 /* Written by Michael I. Bushnell.  */
 
-#include <sys/file.h>
-
-#include "fshelp.h"
+#include "locks.h"
 
 /* Initialize a lock box. */
 void

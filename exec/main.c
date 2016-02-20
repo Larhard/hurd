@@ -25,7 +25,6 @@
 #include <hurd/paths.h>
 #include <hurd/startup.h>
 #include <argp.h>
-#include <argz.h>
 #include <version.h>
 #include <pids.h>
 
@@ -38,9 +37,10 @@ int trivfs_support_read = 0;
 int trivfs_support_write = 0;
 int trivfs_allow_open = 0;
 
-/* Our port classes.  */
-struct port_class *trivfs_protid_class;
-struct port_class *trivfs_control_class;
+struct port_class *trivfs_protid_portclasses[1];
+struct port_class *trivfs_cntl_portclasses[1];
+int trivfs_protid_nportclasses = 1;
+int trivfs_cntl_nportclasses = 1;
 
 struct trivfs_control *fsys;
 
@@ -49,6 +49,7 @@ mach_port_t opt_device_master;
 
 
 #include "exec_S.h"
+#include "exec_experimental_S.h"
 #include "exec_startup_S.h"
 
 static int
@@ -56,6 +57,7 @@ exec_demuxer (mach_msg_header_t *inp, mach_msg_header_t *outp)
 {
   mig_routine_t routine;
   if ((routine = exec_server_routine (inp)) ||
+      (routine = exec_experimental_server_routine (inp)) ||
       (routine = NULL, trivfs_demuxer (inp, outp)) ||
       (routine = exec_startup_server_routine (inp)))
     {
@@ -87,11 +89,11 @@ deadboot (void *p)
   munmap (boot->intarray, boot->nints * sizeof (int));
 
   /* See if we are going away and this was the last thing keeping us up.  */
-  if (ports_count_class (trivfs_control_class) == 0)
+  if (ports_count_class (trivfs_cntl_portclasses[0]) == 0)
     {
       /* We have no fsys control port, so we are detached from the
 	 parent filesystem.  Maybe we have no users left either.  */
-      if (ports_count_class (trivfs_protid_class) == 0)
+      if (ports_count_class (trivfs_protid_portclasses[0]) == 0)
 	{
 	  /* We have no user ports left.  Are we still listening for
 	     exec_startup RPCs from any tasks we already started?  */
@@ -100,9 +102,9 @@ deadboot (void *p)
 	    exit (0);
 	  ports_enable_class (execboot_portclass);
 	}
-      ports_enable_class (trivfs_protid_class);
+      ports_enable_class (trivfs_protid_portclasses[0]);
     }
-  ports_enable_class (trivfs_control_class);
+  ports_enable_class (trivfs_cntl_portclasses[0]);
 }
 
 #define OPT_DEVICE_MASTER_PORT	(-1)
@@ -145,7 +147,7 @@ trivfs_append_args (struct trivfs_control *fsys,
 
   if (MACH_PORT_VALID (opt_device_master))
     {
-      asprintf (&opt, "--device-master-port=%lu", opt_device_master);
+      asprintf (&opt, "--device-master-port=%d", opt_device_master);
 
       if (opt)
 	{
@@ -214,24 +216,15 @@ main (int argc, char **argv)
      S_exec_init (below).  */
   procserver = getproc ();
 
-  err = trivfs_add_port_bucket (&port_bucket);
-  if (err)
-    error (1, 0, "error creating port bucket");
-
-  err = trivfs_add_control_port_class (&trivfs_control_class);
-  if (err)
-    error (1, 0, "error creating control port class");
-
-  err = trivfs_add_protid_port_class (&trivfs_protid_class);
-  if (err)
-    error (1, 0, "error creating protid port class");
-
+  port_bucket = ports_create_bucket ();
+  trivfs_cntl_portclasses[0] = ports_create_class (trivfs_clean_cntl, 0);
+  trivfs_protid_portclasses[0] = ports_create_class (trivfs_clean_protid, 0);
   execboot_portclass = ports_create_class (deadboot, NULL);
 
   /* Reply to our parent.  */
   err = trivfs_startup (bootstrap, 0,
-			trivfs_control_class, port_bucket,
-			trivfs_protid_class, port_bucket,
+			trivfs_cntl_portclasses[0], port_bucket,
+			trivfs_protid_portclasses[0], port_bucket,
 			&fsys);
   mach_port_deallocate (mach_task_self (), bootstrap);
   if (err)
@@ -257,11 +250,11 @@ trivfs_goaway (struct trivfs_control *fsys, int flags)
   int count;
 
   /* Stop new requests.  */
-  ports_inhibit_class_rpcs (trivfs_control_class);
-  ports_inhibit_class_rpcs (trivfs_protid_class);
+  ports_inhibit_class_rpcs (trivfs_cntl_portclasses[0]);
+  ports_inhibit_class_rpcs (trivfs_protid_portclasses[0]);
 
   /* Are there any extant user ports for the /servers/exec file?  */
-  count = ports_count_class (trivfs_protid_class);
+  count = ports_count_class (trivfs_protid_portclasses[0]);
   if (count == 0 || (flags & FSYS_GOAWAY_FORCE))
     {
       /* No users.  Disconnect from the filesystem.  */
@@ -284,9 +277,9 @@ trivfs_goaway (struct trivfs_control *fsys, int flags)
   else
     {
       /* We won't go away, so start things going again...  */
-      ports_enable_class (trivfs_protid_class);
-      ports_resume_class_rpcs (trivfs_control_class);
-      ports_resume_class_rpcs (trivfs_protid_class);
+      ports_enable_class (trivfs_protid_portclasses[0]);
+      ports_resume_class_rpcs (trivfs_cntl_portclasses[0]);
+      ports_resume_class_rpcs (trivfs_protid_portclasses[0]);
 
       return EBUSY;
     }

@@ -44,23 +44,20 @@ int diskfs_maxsymlinks = 8;
 static void
 fetch_root ()
 {
-  struct lookup_context ctx;
-  ino_t id;
+  struct rrip_lookup rl;
+  struct dirrect *dr;
   error_t err;
 
-  ctx.dr = (struct dirrect *) sblock->root;
+  dr = (struct dirrect *) sblock->root;
 
   /* First check for SUSP and all relevant extensions */
-  rrip_initialize (ctx.dr);
+  rrip_initialize (dr);
 
   /* Now rescan the node for real */
-  rrip_lookup (ctx.dr, &ctx.rr, 1);
-
-  err = cache_id (ctx.dr, &ctx.rr, &id);
-  assert_perror (err);
+  rrip_lookup (dr, &rl, 1);
 
   /* And fetch the node. */
-  err = diskfs_cached_lookup_context (id, &diskfs_root_node, &ctx);
+  err = load_inode (&diskfs_root_node, dr, &rl);
   assert_perror (err);
 
   pthread_mutex_unlock (&diskfs_root_node->lock);

@@ -25,5 +25,3 @@
   end_using_port_info (port_info_t)
 #define NOTIFY_IMPORTS						\
   import "libports/mig-decls.h";
-#define DEVICE_IMPORTS						\
-  import "libports/ports.h";

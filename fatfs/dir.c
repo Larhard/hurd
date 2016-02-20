@@ -342,7 +342,7 @@ diskfs_lookup_hard (struct node *dp, const char *name, enum lookup_type type,
 
       /* Here below are the spec dotdot cases.  */
       else if (type == RENAME || type == REMOVE)
-        np = diskfs_cached_ifind (inum);
+        np = ifind (inum);
 
       else if (type == LOOKUP)
         {
@@ -395,7 +395,7 @@ diskfs_lookup_hard (struct node *dp, const char *name, enum lookup_type type,
                 diskfs_nput (np);
             }
           else if (type == RENAME || type == REMOVE)
-            /* We just did diskfs_cached_ifind to get np; that allocates
+            /* We just did ifind to get np; that allocates
                no new references, so we don't have anything to do.  */
             ;
           else if (type == LOOKUP)
@@ -497,14 +497,13 @@ dirscanblock (vm_address_t blockaddr, struct node *dp, int idx,
 	       component.  */
 	    continue;
 	  
-	  if (fatnamematch ((const char *) entry->name, name, namelen))
+	  if (fatnamematch (entry->name, name, namelen))
 	    break;
 	}
 
       if (consider_compress
-	  && ((enum slot_status) ds->type == LOOKING
-	      || ((enum slot_status) ds->type == COMPRESS &&
-                  ds->nbytes > nbytes)))
+	  && (ds->type == LOOKING
+	      || (ds->type == COMPRESS && ds->nbytes > nbytes)))
 	{
 	  ds->type = CREATE;
 	  ds->stat = COMPRESS;
@@ -729,12 +728,11 @@ diskfs_dirrewrite_hard (struct node *dp, struct node *np, struct dirstat *ds)
   entry_key.dir_inode = dp->cache_id;
   entry_key.dir_offset = ((int) ds->entry) - ((int) ds->mapbuf);
   err = vi_rlookup (entry_key, &inode, &vinode, 0);
+  
   assert (err != EINVAL);
-  if (err)
-    return err;
-
+  
   /*  Lookup the node, we already have a reference.  */
-  oldnp = diskfs_cached_ifind (inode);
+  oldnp = ifind (inode);
 
   assert (ds->type == RENAME);
   assert (ds->stat == HERE_TIS);
@@ -935,7 +933,7 @@ diskfs_get_directs (struct node *dp,
 
       /* See if there's room to hold this one.  */
       
-      fat_to_unix_filename ((const char *) ep->name, name);
+      fat_to_unix_filename(ep->name, name);
       namlen = strlen(name);
 
       /* Perhaps downcase it?  */

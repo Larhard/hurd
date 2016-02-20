@@ -19,6 +19,7 @@
 
 #include "io_S.h"
 #include "fs_S.h"
+#include "fs_experimental_S.h"
 #include "../libports/notify_S.h"
 #include "fsys_S.h"
 #include "../libports/interrupt_S.h"
@@ -33,6 +34,7 @@ diskfs_demuxer (mach_msg_header_t *inp,
   mig_routine_t routine;
   if ((routine = diskfs_io_server_routine (inp)) ||
       (routine = diskfs_fs_server_routine (inp)) ||
+      (routine = diskfs_fs_experimental_server_routine (inp)) ||
       (routine = ports_notify_server_routine (inp)) ||
       (routine = diskfs_fsys_server_routine (inp)) ||
       (routine = ports_interrupt_server_routine (inp)) ||

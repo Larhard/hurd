@@ -142,7 +142,6 @@ pager_clear_user_data (struct user_pager_info *upi)
 }
 
 static struct port_bucket *pager_port_bucket = 0;
-static struct pager_requests *pager_requests;
 
 /* Initialize paging for this device.  */
 static void
@@ -155,12 +154,13 @@ init_dev_paging ()
       pthread_mutex_lock (&pager_global_lock);
       if (pager_port_bucket == NULL)
 	{
+	  pthread_t thread;
 	  error_t err;
 
 	  pager_port_bucket = ports_create_bucket ();
 
 	  /* Start libpagers worker threads.  */
-	  err = pager_start_workers (pager_port_bucket, &pager_requests);
+	  err = pager_start_workers (pager_port_bucket);
 	  if (err)
 	    {
 	      errno = err;

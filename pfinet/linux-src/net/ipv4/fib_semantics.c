@@ -113,7 +113,7 @@ void fib_release_info(struct fib_info *fi)
 	}
 }
 
-static __inline__ int nh_comp(const struct fib_info *fi, const struct fib_info *ofi)
+extern __inline__ int nh_comp(const struct fib_info *fi, const struct fib_info *ofi)
 {
 	const struct fib_nh *onh = ofi->fib_nh;
 
@@ -134,7 +134,7 @@ static __inline__ int nh_comp(const struct fib_info *fi, const struct fib_info *
 	return 0;
 }
 
-static __inline__ struct fib_info * fib_find_info(const struct fib_info *nfi)
+extern __inline__ struct fib_info * fib_find_info(const struct fib_info *nfi)
 {
 	for_fib_info() {
 		if (fi->fib_nhs != nfi->fib_nhs)

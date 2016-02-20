@@ -53,7 +53,7 @@ print_port_info (mach_port_t name, mach_port_type_t type, task_t task,
 	return err;
     }
 
-  fprintf (stream, hex_names ? "%#6lx: " : "%6lu: ", name);
+  fprintf (stream, hex_names ? "%#6zx: " : "%6zd: ", name);
 
   if (type & MACH_PORT_TYPE_RECEIVE)
     {
@@ -68,7 +68,7 @@ print_port_info (mach_port_t name, mach_port_type_t type, task_t task,
 	      fprintf (stream, " (");
 	      if (status.mps_pset != MACH_PORT_NULL)
 		fprintf (stream,
-			 hex_names ? "port-set: %#lx, " : "port-set: %lu, ",
+			 hex_names ? "port-set: %#zx, " : "port-set: %zd, ",
 			 status.mps_pset);
 	      fprintf (stream, "seqno: %zu", status.mps_seqno);
 	      if (status.mps_mscount)
@@ -119,9 +119,9 @@ print_port_info (mach_port_t name, mach_port_type_t type, task_t task,
 		fprintf (stream, " (empty)");
 	      else
 		{
-		  fprintf (stream, hex_names ? " (%#lx" : " (%lu", members[0]);
+		  fprintf (stream, hex_names ? " (%#zx" : " (%zu", members[0]);
 		  for (i = 1; i < members_len; i++)
-		    fprintf (stream, hex_names ? ", %#lx" : ", %lu",
+		    fprintf (stream, hex_names ? ", %#zx" : ", %zu",
 			     members[i]);
 		  fprintf (stream, ")");
 		  munmap ((caddr_t) members, members_len * sizeof *members);

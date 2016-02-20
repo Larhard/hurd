@@ -117,7 +117,7 @@ struct inet6_dev
 
 extern struct ipv6_devconf ipv6_devconf;
 
-static __inline__ void ipv6_eth_mc_map(struct in6_addr *addr, char *buf)
+extern __inline__ void ipv6_eth_mc_map(struct in6_addr *addr, char *buf)
 {
 	/*
 	 *	+-------+-------+-------+-------+-------+-------+

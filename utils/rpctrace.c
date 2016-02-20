@@ -26,7 +26,9 @@
 #include <mach/message.h>
 #include <assert.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <unistd.h>
 #include <argp.h>
 #include <error.h>
@@ -39,15 +41,24 @@
 #include <argz.h>
 #include <envz.h>
 
-#include "msgids.h"
-
 const char *argp_program_version = STANDARD_HURD_VERSION (rpctrace);
+
+#define STD_MSGIDS_DIR DATADIR "/msgids/"
 
 static unsigned strsize = 80;
 
+#define OPT_NOSTDINC -1
 static const struct argp_option options[] =
 {
   {"output", 'o', "FILE", 0, "Send trace output to FILE instead of stderr."},
+  {"nostdinc", OPT_NOSTDINC, 0, 0, 
+   "Do not search inside the standard system directory, `" STD_MSGIDS_DIR
+   "', for `.msgids' files."},
+  {"rpc-list", 'i', "FILE", 0,
+   "Read FILE for assocations of message ID numbers to names."},
+  {0, 'I', "DIR", 0,
+   "Add the directory DIR to the list of directories to be searched for files "
+   "containing message ID numbers."},
   {0, 's', "SIZE", 0, "Specify the maximum string size to print (the default is 80)."},
   {0, 'E', "var[=value]", 0,
    "Set/change (var=value) or remove (var) an environment variable among the "
@@ -60,12 +71,32 @@ static const struct argp_option options[] =
 static const char args_doc[] = "COMMAND [ARG...]";
 static const char doc[] = "Trace Mach Remote Procedure Calls.";
 
+/* The msgid_ihash table maps msgh_id values to names.  */
+
+struct msgid_info
+{
+  char *name;
+  char *subsystem;
+};
+
+static void
+msgid_ihash_cleanup (void *element, void *arg)
+{
+  struct msgid_info *info = element;
+  free (info->name);
+  free (info->subsystem);
+  free (info);
+}
+
 /* This structure stores the information of the traced task. */
 struct task_info
 {
   task_t task;
   boolean_t threads_wrapped;	/* All threads of the task has been wrapped? */
 };
+
+static struct hurd_ihash msgid_ihash
+  = HURD_IHASH_INITIALIZER (HURD_IHASH_NO_LOCP);
 
 static struct hurd_ihash task_ihash
   = HURD_IHASH_INITIALIZER (HURD_IHASH_NO_LOCP);
@@ -93,6 +124,86 @@ void
 remove_task (task_t task)
 {
   hurd_ihash_remove (&task_ihash, task);
+}
+
+/* Parse a file of RPC names and message IDs as output by mig's -list
+   option: "subsystem base-id routine n request-id reply-id".  Put each
+   request-id value into `msgid_ihash' with the routine name as its value.  */
+static void
+parse_msgid_list (const char *filename)
+{
+  FILE *fp;
+  char *buffer = NULL;
+  size_t bufsize = 0;
+  unsigned int lineno = 0;
+  char *name, *subsystem;
+  unsigned int msgid;
+  error_t err;
+
+  fp = fopen (filename, "r");
+  if (fp == 0)
+    {
+      error (2, errno, "%s", filename);
+      return;
+    }
+
+  while (getline (&buffer, &bufsize, fp) > 0)
+    {
+      ++lineno;
+      if (buffer[0] == '#' || buffer[0] == '\0')
+	continue;
+      if (sscanf (buffer, "%ms %*u %ms %*u %u %*u\n",
+		  &subsystem, &name, &msgid) != 3)
+	error (0, 0, "%s:%u: invalid format in RPC list file",
+	       filename, lineno);
+      else
+	{
+	  struct msgid_info *info = malloc (sizeof *info);
+	  if (info == 0)
+	    error (1, errno, "malloc");
+	  info->name = name;
+	  info->subsystem = subsystem;
+	  err = hurd_ihash_add (&msgid_ihash, msgid, info);
+	  if (err)
+	    error (1, err, "hurd_ihash_add");
+	}
+    }
+
+  free (buffer);
+  fclose (fp);
+}
+
+/* Look for a name describing MSGID.  We check the table directly, and
+   also check if this looks like the ID of a reply message whose request
+   ID is already in the table.  */
+static const struct msgid_info *
+msgid_info (mach_msg_id_t msgid)
+{
+  const struct msgid_info *info = hurd_ihash_find (&msgid_ihash, msgid);
+  if (info == 0 && (msgid / 100) % 2 == 1)
+    {
+      /* This message ID is not in the table, and its number makes it
+	 what should be an RPC reply message ID.  So look up the message
+	 ID of the corresponding RPC request and synthesize a name from
+	 that.  Then stash that name in the table so the next time the
+	 lookup will match directly.  */
+      info = hurd_ihash_find (&msgid_ihash, msgid - 100);
+      if (info != 0)
+	{
+	  struct msgid_info *reply_info = malloc (sizeof *info);
+	  if (reply_info != 0)
+	    {
+	      reply_info->subsystem = strdup (info->subsystem);
+	      reply_info->name = 0;
+	      asprintf (&reply_info->name, "%s-reply", info->name);
+	      hurd_ihash_add (&msgid_ihash, msgid, reply_info);
+	      info = reply_info;
+	    }
+	  else
+	    info = 0;
+	}
+    }
+  return info;
 }
 
 static const char *
@@ -353,7 +464,7 @@ new_send_wrapper (struct receiver_info *receive, task_t task,
   assert_perror (err);
 
   TRACED_INFO (info)->name = 0;
-  asprintf (&TRACED_INFO (info)->name, "  %lu<--%lu(pid%d)", 
+  asprintf (&TRACED_INFO (info)->name, "  %d<--%d(pid%d)", 
 	    receive->forward, TRACED_INFO (info)->pi.port_right, task2pid (task));
   TRACED_INFO (info)->type = MACH_MSG_TYPE_MOVE_SEND;
   info->task = task;
@@ -979,7 +1090,7 @@ wrap_all_threads (task_t task)
 						  task, &new_thread_port);
 	  free (TRACED_INFO (thread_send_wrapper)->name);
 	  asprintf (&TRACED_INFO (thread_send_wrapper)->name,
-		    "thread%lu(pid%d)", threads[i], task2pid (task));
+		    "thread%d(pid%d)", threads[i], task2pid (task));
 
 	  err = mach_port_insert_right (mach_task_self (),
 					new_thread_port, new_thread_port,
@@ -994,8 +1105,7 @@ wrap_all_threads (task_t task)
 	  mach_port_deallocate (mach_task_self (), new_thread_port);
 	}
     }
-  vm_deallocate (mach_task_self (), (vm_address_t) threads,
-                 nthreads * sizeof (thread_t));
+  vm_deallocate (mach_task_self (), threads, nthreads * sizeof (thread_t));
 }
 
 /* Wrap the new thread port that is in the message. */
@@ -1031,7 +1141,7 @@ wrap_new_thread (mach_msg_header_t *inp, struct req_info *req)
   mach_port_deallocate (mach_task_self (), reply->child_thread);
 
   free (TRACED_INFO (send_wrapper)->name);
-  asprintf (&TRACED_INFO (send_wrapper)->name, "thread%lu(pid%d)",
+  asprintf (&TRACED_INFO (send_wrapper)->name, "thread%d(pid%d)",
 	    thread_port, task2pid (req->from));
   ports_port_deref (send_wrapper);
 }
@@ -1078,10 +1188,10 @@ wrap_new_task (mach_msg_header_t *inp, struct req_info *req)
 
   pid = task2pid (task_port);
   free (TRACED_INFO (task_wrapper1)->name);
-  asprintf (&TRACED_INFO (task_wrapper1)->name, "task%lu(pid%d)",
+  asprintf (&TRACED_INFO (task_wrapper1)->name, "task%d(pid%d)",
 	    task_port, task2pid (req->from));
   free (TRACED_INFO (task_wrapper2)->name);
-  asprintf (&TRACED_INFO (task_wrapper2)->name, "task%lu(pid%d)",
+  asprintf (&TRACED_INFO (task_wrapper2)->name, "task%d(pid%d)",
 	    task_port, pid);
   ports_port_deref (task_wrapper1);
 }
@@ -1132,7 +1242,7 @@ trace_and_forward (mach_msg_header_t *inp, mach_msg_header_t *outp)
 	    MACH_MSGH_BITS_REMOTE (inp->msgh_bits),
 	    is_notification (inp)? MACH_MSG_TYPE_MOVE_SEND_ONCE: info->type)
 	    | MACH_MSGH_BITS_OTHER (inp->msgh_bits);
-	  inp->msgh_local_port = ports_payload_get_name ((unsigned int) info);
+	  inp->msgh_local_port = ports_payload_get_name (info);
 	}
     }
   else
@@ -1277,8 +1387,8 @@ trace_and_forward (mach_msg_header_t *inp, mach_msg_header_t *outp)
 	  && inp->msgh_size >= sizeof (mig_reply_header_t)
 	  /* The notification message is considered as a request. */
 	  && (inp->msgh_id > 72 || inp->msgh_id < 64)
-          && !memcmp(&((mig_reply_header_t *) inp)->RetCodeType,
-                     &RetCodeType, sizeof (RetCodeType)))
+	  && (*(int *) &((mig_reply_header_t *) inp)->RetCodeType
+	      == *(int *)&RetCodeType))
 	{
 	  struct req_info *req = remove_request (inp->msgh_id - 100,
 						 inp->msgh_remote_port);
@@ -1646,7 +1756,7 @@ traced_spawn (char **argv, char **envp)
   ti = new_send_wrapper (receive_ti, traced_task, &task_wrapper);
   ti->task = traced_task;
   free (TRACED_INFO (ti)->name);
-  asprintf (&TRACED_INFO (ti)->name, "task%lu(pid%d)", traced_task, pid);
+  asprintf (&TRACED_INFO (ti)->name, "task%d(pid%d)", traced_task, pid);
 
   /* Replace the task's kernel port with the wrapper.  When this task calls
      `mach_task_self ()', it will get our wrapper send right instead of its
@@ -1660,7 +1770,11 @@ traced_spawn (char **argv, char **envp)
   /* Now actually run the command they told us to trace.  We do the exec on
      the actual task, so the RPCs to map in the program itself do not get
      traced.  Could have an option to use TASK_WRAPPER here instead.  */
+#ifdef HAVE__HURD_EXEC_FILE_NAME
+  err = _hurd_exec_file_name (traced_task, file, *argv, argv, envp);
+#else
   err = _hurd_exec (traced_task, file, argv, envp);
+#endif
   if (err)
     error (2, err, "cannot exec `%s'", argv[0]);
 
@@ -1671,9 +1785,55 @@ traced_spawn (char **argv, char **envp)
   return pid;
 }
 
+
+static void
+scan_msgids_dir (char **argz, size_t *argz_len, char *dir, bool append)
+{
+  struct dirent **eps;
+  int n;
+	    
+  int
+    msgids_file_p (const struct dirent *eps)
+    {
+      if (fnmatch ("*.msgids", eps->d_name, 0) != FNM_NOMATCH)
+        return 1;
+      return 0;
+    }
+	    
+  n = scandir (dir, &eps, msgids_file_p, NULL);
+  if (n >= 0)
+    {
+      for (int cnt = 0; cnt < n; ++cnt)
+	{
+	  char *msgids_file;
+
+	  if (asprintf (&msgids_file, "%s/%s", dir, eps[cnt]->d_name) < 0)
+	    error (1, errno, "asprintf");
+
+	  if (append == TRUE)
+	    {
+	      if (argz_add (argz, argz_len, msgids_file) != 0)
+		error (1, errno, "argz_add");
+	    }
+	  else
+	    {
+	      if (argz_insert (argz, argz_len, *argz, msgids_file) != 0)
+		error (1, errno, "argz_insert");
+	    }
+	  free (msgids_file);
+	}
+    }
+
+  /* If the directory couldn't be scanned for whatever reason, just ignore
+     it. */
+}
+
 int
 main (int argc, char **argv, char **envp)
 {
+  char *msgids_files_argz = NULL;
+  size_t msgids_files_argz_len = 0;
+  bool nostdinc = FALSE;
   const char *outfile = 0;
   char **cmd_argv = 0;
   pthread_t thread;
@@ -1689,6 +1849,21 @@ main (int argc, char **argv, char **envp)
 	{
 	case 'o':
 	  outfile = arg;
+	  break;
+
+	case OPT_NOSTDINC:
+	  nostdinc = TRUE;
+	  break;
+
+	case 'i':
+	  if (argz_add (&msgids_files_argz, &msgids_files_argz_len, 
+			arg) != 0)
+	    error (1, errno, "argz_add");
+	  break;
+
+	case 'I':
+	  scan_msgids_dir (&msgids_files_argz, &msgids_files_argz_len,
+			  arg, TRUE);
 	  break;
 
 	case 's':
@@ -1737,12 +1912,7 @@ main (int argc, char **argv, char **envp)
 	}
       return 0;
     }
-  const struct argp_child children[] =
-    {
-      { .argp=&msgid_argp, },
-      { 0 }
-    };
-  const struct argp argp = { options, parse_opt, args_doc, doc, children };
+  const struct argp argp = { options, parse_opt, args_doc, doc };
 
   /* Parse our arguments.  */
   argp_parse (&argp, argc, argv, ARGP_IN_ORDER, 0, 0);
@@ -1750,6 +1920,23 @@ main (int argc, char **argv, char **envp)
   err = mach_port_allocate (mach_task_self (), MACH_PORT_RIGHT_DEAD_NAME,
 			    &unknown_task);
   assert_perror (err);
+
+  /* Insert the files from STD_MSGIDS_DIR at the beginning of the list, so that
+     their content can be overridden by subsequently parsed files.  */
+  if (nostdinc == FALSE)
+    scan_msgids_dir (&msgids_files_argz, &msgids_files_argz_len,
+		    STD_MSGIDS_DIR, FALSE);
+
+  if (msgids_files_argz != NULL)
+    {
+      char *msgids_file = NULL;
+
+      while ((msgids_file = argz_next (msgids_files_argz,
+				       msgids_files_argz_len, msgids_file)))
+	parse_msgid_list (msgids_file);
+
+      free (msgids_files_argz);
+    }
 
   if (outfile)
     {
@@ -1767,6 +1954,8 @@ main (int argc, char **argv, char **envp)
   err = ports_create_port (other_class, traced_bucket,
 			   sizeof (*notify_pi), &notify_pi);
   assert_perror (err);
+
+  hurd_ihash_set_cleanup (&msgid_ihash, msgid_ihash_cleanup, 0);
 
   /* Spawn a single thread that will receive intercepted messages, print
      them, and interpose on the ports they carry.  The access to the

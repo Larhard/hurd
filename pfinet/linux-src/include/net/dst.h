@@ -80,7 +80,7 @@ struct dst_ops
 extern struct dst_entry * dst_garbage_list;
 extern atomic_t	dst_total;
 
-static __inline__
+extern __inline__
 struct dst_entry * dst_clone(struct dst_entry * dst)
 {
 	if (dst)
@@ -88,7 +88,7 @@ struct dst_entry * dst_clone(struct dst_entry * dst)
 	return dst;
 }
 
-static __inline__
+extern __inline__
 void dst_release(struct dst_entry * dst)
 {
 	if (dst)
@@ -99,7 +99,7 @@ void dst_release(struct dst_entry * dst)
    destination entry has just been removed from a location
    accessed directly by hard irq.
  */
-static __inline__
+extern __inline__
 void dst_release_irqwait(struct dst_entry * dst)
 {
 	if (dst) {
@@ -108,7 +108,7 @@ void dst_release_irqwait(struct dst_entry * dst)
 	}
 }
 
-static __inline__
+extern __inline__
 struct dst_entry * dst_check(struct dst_entry ** dst_p, u32 cookie)
 {
 	struct dst_entry * dst = *dst_p;
@@ -117,7 +117,7 @@ struct dst_entry * dst_check(struct dst_entry ** dst_p, u32 cookie)
 	return (*dst_p = dst);
 }
 
-static __inline__
+extern __inline__
 struct dst_entry * dst_reroute(struct dst_entry ** dst_p, struct sk_buff *skb)
 {
 	struct dst_entry * dst = *dst_p;
@@ -127,11 +127,11 @@ struct dst_entry * dst_reroute(struct dst_entry ** dst_p, struct sk_buff *skb)
 }
 
 
-extern void __dst_free(struct dst_entry * dst);
 extern void * dst_alloc(int size, struct dst_ops * ops);
+extern void __dst_free(struct dst_entry * dst);
 extern void dst_destroy(struct dst_entry * dst);
 
-static __inline__
+extern __inline__
 void dst_free(struct dst_entry * dst)
 {
 	if (dst->obsolete > 1)
@@ -143,27 +143,27 @@ void dst_free(struct dst_entry * dst)
 	__dst_free(dst);
 }
 
-static __inline__ void dst_confirm(struct dst_entry *dst)
+extern __inline__ void dst_confirm(struct dst_entry *dst)
 {
 	if (dst)
 		neigh_confirm(dst->neighbour);
 }
 
-static __inline__ void dst_negative_advice(struct dst_entry **dst_p)
+extern __inline__ void dst_negative_advice(struct dst_entry **dst_p)
 {
 	struct dst_entry * dst = *dst_p;
 	if (dst && dst->ops->negative_advice)
 		*dst_p = dst->ops->negative_advice(dst);
 }
 
-static __inline__ void dst_link_failure(struct sk_buff *skb)
+extern __inline__ void dst_link_failure(struct sk_buff *skb)
 {
 	struct dst_entry * dst = skb->dst;
 	if (dst && dst->ops && dst->ops->link_failure)
 		dst->ops->link_failure(skb);
 }
 
-static __inline__ void dst_set_expires(struct dst_entry *dst, int timeout)
+extern __inline__ void dst_set_expires(struct dst_entry *dst, int timeout)
 {
 	unsigned long expires = jiffies + timeout;
 
