@@ -15,6 +15,8 @@
 
 #include "audioio.h"
 
+#include "oioctl_S.h"
+
 #include "config.h"
 #include "logging.h"
 
@@ -257,7 +259,23 @@ trivfs_S_io_clear_some_openmodes (trivfs_protid_t cred,
 }
 
 /* ioctls */
-/* TODO */
+kern_return_t
+S_oioctl_sndctl_dsp_speed (trivfs_protid_t reqport, int *rate)
+{
+	audio_info_t info;
+	AUDIO_INITINFO(&info);
+	info.play.sample_rate = *rate;
+	info.play.channels = 1;
+	info.play.precision = 16;
+	info.play.encoding = AUDIO_ENCODING_LINEAR;
+	info.play.samples = 0;
+	if (rump_sys_ioctl(audio_fd, AUDIO_SETINFO, &info)) {
+		err("rump_sys_ioctl AUDIO_SETINFO: %s", rump_strerror(errno));
+		return EIO;
+	}
+	*rate = info.play.sample_rate;
+	return 0;
+}
 
 /* demuxer */
 int
@@ -322,7 +340,7 @@ main (int argc, char *argv[])
 	info.play.encoding = AUDIO_ENCODING_LINEAR;
 	info.play.samples = 0;
 	if (rump_sys_ioctl(audio_fd, AUDIO_SETINFO, &info)) {
-		err("rump_sys_ioctl AUDIO_SETINFO: ", rump_strerror(errno));
+		err("rump_sys_ioctl AUDIO_SETINFO: %s", rump_strerror(errno));
 		return EIO;
 	}
 
