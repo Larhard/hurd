@@ -69,7 +69,7 @@ cpp = $(CC) $(CPPFLAGS) $(CFLAGS) $(CPPFLAGS-$@) -E -x c
 %ioctl-requests.list: %ioctl-headers.h
 	$(cpp) $< | sed -n 's/^#.*"\([^"]*\)".*$$/\1/p' | sort | uniq | \
 	while read f; do \
-	  sed -n 's/^[ 	]*#[ 	]*define[ 	]*\([A-Z0-9_]*\)[^A-Z0-9_][^A-Z0-9_]*_IO.*'\'$*\'.*$$'/\1/p' $$f; \
+	  sed -n 's/^[ 	]*#[ 	]*define[ 	]*\([A-Z0-9_]*\)[^A-Z0-9_][^A-Z0-9_]*_IO.*'\'$*\''.*$$/\1/p' $$f; \
 	done | sort | uniq > $@
 
 %ioctl.defs: %ioctl.sym
