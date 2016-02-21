@@ -58,7 +58,7 @@ hurd.msgids: $(patsubst %.defs,%.msgids,$(filter %.defs,$(INSTHDRS)))
 %.symc.o: %.symc
 	$(CC) -S $(CPPFLAGS) $(CFLAGS) $(CPPFLAGS-$@) -x c -o $@ $<
 %.h: %.symc.o
-	sed <$< -e 's/^[^*].*$$//' | \
+	sed <$< -e 's/^[[:space:]]*//' -e 's/^[^*].*$$//' | \
 	    sed -e 's/^[*]/#define/' -e 's/mAgIc[^-0-9]*//' -e '/^ *$$/d' >$@
 
 %-ioctls.sym: tmpl-ioctls.sym
