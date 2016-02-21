@@ -2241,6 +2241,12 @@ S_term_on_pty (struct trivfs_protid *cred,
   return EOPNOTSUPP;
 }
 
+kern_return_t
+S_tioctl_sndctl_dsp_bind_channel (trivfs_protid_t port, int *binding)
+{
+  return EOPNOTSUPP;
+}
+
 error_t
 trivfs_goaway (struct trivfs_control *cntl, int flags)
 {

@@ -255,4 +255,11 @@ routine tioctl_tioccbrk (
 routine tioctl_tiocsbrk (
 	port: io_t);
 
+skip; skip; /* 124 - 125 unused */
+
+/* 126 SNDCTL_DSP_BIND_CHANNEL */
+routine tioctl_sndctl_dsp_bind_channel (
+	port: io_t;
+	out binding: int);
+
 /* 124 - 256 unused */

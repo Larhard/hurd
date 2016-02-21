@@ -1978,6 +1978,12 @@ S_tioctl_tiocsbrk (struct protid *cred)
   return EOPNOTSUPP;
 }
 
+kern_return_t
+S_tioctl_sndctl_dsp_bind_channel (protid_t port, int *binding)
+{
+  return EOPNOTSUPP;
+}
+
 
 int
 console_demuxer (mach_msg_header_t *inp,

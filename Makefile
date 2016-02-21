@@ -43,6 +43,7 @@ prog-subdirs = auth proc exec term \
 	       procfs \
 	       startup \
 	       init \
+	       oss \
 	       devnode
 
 ifeq ($(HAVE_SUN_RPC),yes)
