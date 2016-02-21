@@ -8,11 +8,14 @@
 
 extern FILE *oss_log;
 
-#define init_logging() (oss_log = fopen(oss_log, "at"))
+#define init_logging() (oss_log = fopen(OSS_LOG_FILE, "at"))
 #define close_logging() fclose(oss_log)
 
 #define write_log(level,fmt,args...) \
-	fprintf(oss_log, "%s: oss[%d]: " fmt "\n", level, getpid(), ##args)
+	{ \
+		fprintf(oss_log, "%s: oss[%d]: " fmt "\n", level, getpid(), ##args); \
+		fflush(oss_log); \
+	}
 
 #define err(fmt,args...) write_log("ERROR", fmt, ##args)
 #define warn(fmt,args...) write_log("WARNING", fmt, ##args)

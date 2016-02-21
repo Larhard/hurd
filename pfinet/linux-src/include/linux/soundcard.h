@@ -37,7 +37,7 @@
 #define OPEN_SOUND_SYSTEM
 
 /* In Linux we need to be prepared for cross compiling */
-#include <linux/ioctl.h>
+//#include <linux/ioctl.h>
 
 /*
  *	Supported card ID numbers (Should be somewhere else?)

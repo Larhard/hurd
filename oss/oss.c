@@ -1,6 +1,7 @@
 #define _GNU_SOURCE 1
 
 #include <argp.h>
+#include <errno.h>
 #include <error.h>
 #include <fcntl.h>
 #include <hurd.h>
@@ -8,7 +9,9 @@
 #include <stdio.h>
 #include <sys/mman.h>
 
-#include "tioctl_S.h"
+#include <rump/rump.h>
+#include <rump/rump_syscalls.h>
+#include <rump/rumperr.h>
 
 #include "config.h"
 #include "logging.h"
@@ -16,6 +19,7 @@
 /* peropen data */
 struct peropen_data
 {
+	int audio_fd;
 };
 
 /* trivfs hooks */
@@ -29,7 +33,7 @@ int trivfs_support_write = 1;
 int trivfs_support_exec = 0;
 
 void
-trivfs_modify_stat(struct trivfs_protid *cred, io_statbuf_t *stbuf)
+trivfs_modify_stat(trivfs_protid_t cred, io_statbuf_t *stbuf)
 {
 	stbuf->st_mode &= ~S_IFMT;
 	stbuf->st_mode |= S_IFCHR;
@@ -39,7 +43,7 @@ trivfs_modify_stat(struct trivfs_protid *cred, io_statbuf_t *stbuf)
 kern_return_t
 trivfs_goaway(struct trivfs_control *cntl, int flags)
 {
-	info("going away");
+	info("bye bye");
 	exit(0);
 }
 
@@ -47,12 +51,21 @@ trivfs_goaway(struct trivfs_control *cntl, int flags)
 kern_return_t
 open_hook(struct trivfs_peropen *peropen)
 {
+	debug("open trivfs");
+
 	struct peropen_data *op = malloc(sizeof(struct peropen_data));
 	if (op == NULL) {
 		return errno;
 	}
-
 	peropen->hook = op;
+
+	debug("open rump audio device");
+	int audio_fd = rump_sys_open(RUMP_AUDIO_DEVICE, O_WRONLY);
+	if (audio_fd < 0) {
+		err("rump_open(%s, O_WRONLY): %s", RUMP_AUDIO_DEVICE, rump_strerror(errno))
+		return EIO;
+	}
+	op->audio_fd = audio_fd;
 
 	return 0;
 }
@@ -63,6 +76,12 @@ error_t (*trivfs_peropen_create_hook) (struct trivfs_peropen *perop) = open_hook
 void
 close_hook(struct trivfs_peropen *peropen)
 {
+	debug("close trivfs");
+	struct peropen_data *op = peropen->hook;
+
+	debug("close rump audio device");
+	rump_sys_close(op->audio_fd);
+
 	free(peropen->hook);
 }
 
@@ -70,10 +89,10 @@ void (*trivfs_peropen_destroy_hook) (struct trivfs_peropen *perop) = close_hook;
 
 /* read from trivfs */
 kern_return_t
-trivfs_S_io_read (struct trivfs_protid *cred,
+trivfs_S_io_read (trivfs_protid_t cred,
 		mach_port_t reply, mach_msg_type_name_t reply_type,
 		vm_address_t *data, mach_msg_type_number_t *data_len,
-		off_t offs, mach_msg_type_number_t amount)
+		loff_t offs, mach_msg_type_number_t amount)
 {
 	if (!cred) {
 		return EOPNOTSUPP;
@@ -100,10 +119,10 @@ trivfs_S_io_read (struct trivfs_protid *cred,
 
 /* write to trivfs */
 kern_return_t
-trivfs_S_io_write (struct trivfs_protid *cred,
+trivfs_S_io_write (trivfs_protid_t cred,
 		mach_port_t reply, mach_msg_type_name_t reply_type,
-		vm_address_t data, mach_msg_type_number_t data_len,
-		off_t offs, mach_msg_type_number_t *amount)
+		char * data, mach_msg_type_number_t data_len,
+		loff_t offs, mach_msg_type_number_t *amount)
 {
 	if (!cred) {
 		return EOPNOTSUPP;
@@ -111,7 +130,15 @@ trivfs_S_io_write (struct trivfs_protid *cred,
 		return EBADF;
 	}
 
-	*amount = data_len;
+	struct peropen_data *op = cred->po->hook;
+	int sent = rump_sys_write(op->audio_fd, (char *) data, data_len);
+
+	if (sent < 0) {
+		err("rump_sys_write: %s", rump_strerror(errno));
+		return EIO;
+	}
+
+	*amount = sent;
 	return 0;
 }
 
@@ -119,7 +146,7 @@ trivfs_S_io_write (struct trivfs_protid *cred,
    a "long time" (this should be the same meaning of "long time" used
    by the nonblocking flag.  */
 kern_return_t
-trivfs_S_io_readable (struct trivfs_protid *cred,
+trivfs_S_io_readable (trivfs_protid_t cred,
 		mach_port_t reply, mach_msg_type_name_t replytype,
 		mach_msg_type_number_t *amount)
 {
@@ -134,26 +161,26 @@ trivfs_S_io_readable (struct trivfs_protid *cred,
 
 /* Truncate file.  */
 kern_return_t
-trivfs_S_file_set_size (struct trivfs_protid *cred, off_t size)
+trivfs_S_file_set_size (trivfs_protid_t cred, off_t size)
 {
 	if (!cred) {
 		return EOPNOTSUPP;
-	} else {
-		return 0;
 	}
+
+	return 0;
 }
 
 /* Change current read/write offset */
 kern_return_t
-trivfs_S_io_seek (struct trivfs_protid *cred, mach_port_t reply,
+trivfs_S_io_seek (trivfs_protid_t cred, mach_port_t reply,
 		mach_msg_type_name_t reply_type, off_t offs, int whence,
 		off_t *new_offs)
 {
 	if (! cred) {
 		return EOPNOTSUPP;
-	} else {
-		return 0;
 	}
+
+	return 0;
 }
 
 /* SELECT_TYPE is the bitwise OR of SELECT_READ, SELECT_WRITE, and
@@ -162,7 +189,7 @@ trivfs_S_io_seek (struct trivfs_protid *cred, mach_port_t reply,
    TAG is returned as passed; it is just for the convenience of the
    user in matching up reply messages with specific requests sent.  */
 kern_return_t
-trivfs_S_io_select (struct trivfs_protid *cred,
+trivfs_S_io_select (trivfs_protid_t cred,
 		mach_port_t reply, mach_msg_type_name_t replytype,
 		int *type, int *tag)
 {
@@ -182,65 +209,58 @@ trivfs_S_io_select (struct trivfs_protid *cred,
 
 /* Well, we have to define these four functions, so here we go: */
 kern_return_t
-trivfs_S_io_get_openmodes (struct trivfs_protid *cred, mach_port_t reply,
+trivfs_S_io_get_openmodes (trivfs_protid_t cred, mach_port_t reply,
 		mach_msg_type_name_t replytype, int *bits)
 {
 	if (!cred) {
 		return EOPNOTSUPP;
-	} else {
-		*bits = cred->po->openmodes;
-		return 0;
 	}
+
+	*bits = cred->po->openmodes;
+	return 0;
 }
 
 kern_return_t
-trivfs_S_io_set_all_openmodes (struct trivfs_protid *cred,
+trivfs_S_io_set_all_openmodes (trivfs_protid_t cred,
 		mach_port_t reply,
 		mach_msg_type_name_t replytype,
 		int mode)
 {
 	if (!cred) {
 		return EOPNOTSUPP;
-	} else {
-		return 0;
 	}
+
+	return 0;
 }
 
 kern_return_t
-trivfs_S_io_set_some_openmodes (struct trivfs_protid *cred,
+trivfs_S_io_set_some_openmodes (trivfs_protid_t cred,
 		mach_port_t reply,
 		mach_msg_type_name_t replytype,
 		int bits)
 {
 	if (!cred) {
 		return EOPNOTSUPP;
-	} else {
-		return 0;
 	}
+
+	return 0;
 }
 
 kern_return_t
-trivfs_S_io_clear_some_openmodes (struct trivfs_protid *cred,
+trivfs_S_io_clear_some_openmodes (trivfs_protid_t cred,
 		mach_port_t reply,
 		mach_msg_type_name_t replytype,
 		int bits)
 {
 	if (!cred) {
 		return EOPNOTSUPP;
-	} else {
-		return 0;
 	}
+
+	return 0;
 }
 
 /* ioctls */
-
-/* SNDCTL_DSP_BIND_CHANNEL */
-kern_return_t
-S_tioctl_sndctl_dsp_bind_channel (trivfs_protid_t port, int *binding)
-{
-	*binding = 12345;
-	return 0;
-}
+/* TODO */
 
 /* demuxer */
 int
@@ -248,10 +268,8 @@ oss_demuxer (mach_msg_header_t *inp,
              mach_msg_header_t *outp)
 {
 	extern int trivfs_demuxer (mach_msg_header_t *inp, mach_msg_header_t *outp);
-	extern int tioctl_server (mach_msg_header_t *inp, mach_msg_header_t *outp);
 
-	return (trivfs_demuxer (inp, outp)
-			|| tioctl_server (inp, outp));
+	return (trivfs_demuxer (inp, outp));
 }
 
 /* process arguments */
@@ -263,8 +281,6 @@ static const struct argp argp = {
 int
 main (int argc, char *argv[])
 {
-	init_logging();
-
 	error_t err;
 	mach_port_t bootstrap;
 	struct trivfs_control *fsys;
@@ -286,7 +302,13 @@ main (int argc, char *argv[])
 	}
 
 	/* launch */
+	init_logging();
 	info("start oss translator");
+
+	info("init rump");
+	rump_init();
+
+	info("wait for orders");
 	ports_manage_port_operations_one_thread(fsys->pi.bucket, oss_demuxer, 0);
 
 	return 0;
