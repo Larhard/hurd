@@ -13,13 +13,16 @@
 #include <rump/rump_syscalls.h>
 #include <rump/rumperr.h>
 
+#include "audioio.h"
+
 #include "config.h"
 #include "logging.h"
+
+static int audio_fd;
 
 /* peropen data */
 struct peropen_data
 {
-	int audio_fd;
 };
 
 /* trivfs hooks */
@@ -43,6 +46,10 @@ trivfs_modify_stat(trivfs_protid_t cred, io_statbuf_t *stbuf)
 kern_return_t
 trivfs_goaway(struct trivfs_control *cntl, int flags)
 {
+	if (audio_fd > 0) {
+		rump_sys_close(audio_fd);
+	}
+
 	info("bye bye");
 	exit(0);
 }
@@ -59,14 +66,6 @@ open_hook(struct trivfs_peropen *peropen)
 	}
 	peropen->hook = op;
 
-	debug("open rump audio device");
-	int audio_fd = rump_sys_open(RUMP_AUDIO_DEVICE, O_WRONLY);
-	if (audio_fd < 0) {
-		err("rump_open(%s, O_WRONLY): %s", RUMP_AUDIO_DEVICE, rump_strerror(errno))
-		return EIO;
-	}
-	op->audio_fd = audio_fd;
-
 	return 0;
 }
 
@@ -77,10 +76,6 @@ void
 close_hook(struct trivfs_peropen *peropen)
 {
 	debug("close trivfs");
-	struct peropen_data *op = peropen->hook;
-
-	debug("close rump audio device");
-	rump_sys_close(op->audio_fd);
 
 	free(peropen->hook);
 }
@@ -130,8 +125,8 @@ trivfs_S_io_write (trivfs_protid_t cred,
 		return EBADF;
 	}
 
-	struct peropen_data *op = cred->po->hook;
-	int sent = rump_sys_write(op->audio_fd, (char *) data, data_len);
+	debug("write %d bytes", data_len);
+	int sent = rump_sys_write(audio_fd, (char *) data, data_len);
 
 	if (sent < 0) {
 		err("rump_sys_write: %s", rump_strerror(errno));
@@ -150,12 +145,14 @@ trivfs_S_io_readable (trivfs_protid_t cred,
 		mach_port_t reply, mach_msg_type_name_t replytype,
 		mach_msg_type_number_t *amount)
 {
-	if (!cred)
+	if (!cred) {
 		return EOPNOTSUPP;
-	else if (!(cred->po->openmodes & O_READ))
+	} else if (!(cred->po->openmodes & O_READ)) {
 		return EINVAL;
-	else
+	} else {
 		*amount = 0;
+	}
+
 	return 0;
 }
 
@@ -301,13 +298,35 @@ main (int argc, char *argv[])
 		error(3, err, "trivfs_startup");
 	}
 
-	/* launch */
+	/* launch translator */
 	init_logging();
 	info("start oss translator");
 
 	info("init rump");
 	rump_init();
 
+	debug("open rump audio device");
+	audio_fd = rump_sys_open(RUMP_AUDIO_DEVICE, O_WRONLY);
+
+	if (audio_fd < 0) {
+		err("rump_open(%s, O_WRONLY): %s", RUMP_AUDIO_DEVICE, rump_strerror(errno));
+		return EIO;
+	}
+
+	/* set default parameters */
+	audio_info_t info;
+	AUDIO_INITINFO(&info);
+	info.play.sample_rate = 44100;
+	info.play.channels = 1;
+	info.play.precision = 16;
+	info.play.encoding = AUDIO_ENCODING_LINEAR;
+	info.play.samples = 0;
+	if (rump_sys_ioctl(audio_fd, AUDIO_SETINFO, &info)) {
+		err("rump_sys_ioctl AUDIO_SETINFO: ", rump_strerror(errno));
+		return EIO;
+	}
+
+	/* wait for orders */
 	info("wait for orders");
 	ports_manage_port_operations_one_thread(fsys->pi.bucket, oss_demuxer, 0);
 
